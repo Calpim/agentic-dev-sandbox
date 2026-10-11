@@ -15,21 +15,28 @@ from orchestrator.activities import (
 @pytest.fixture(autouse=True)
 def cleanup_generated_artifacts():
     """テスト実行前後に生成ファイルを自動クリーンアップして冪等性を担保する"""
-    yield
-    # テスト対象PBIの生成ファイルを削除
-    for pbi in ["PBI-501", "PBI-502", "PBI-503", "PBI-504", "PBI-505", "PBI-506"]:
-        clean_id = pbi.lower().replace("-", "_")
-        for comp in ("app", "bff"):
-            test_file = BASE_DIR / "src" / comp / "tests" / f"test_{clean_id}.py"
-            impl_file = BASE_DIR / "src" / comp / f"{clean_id}_service.py"
-            if test_file.exists():
-                test_file.unlink()
-            if impl_file.exists():
-                impl_file.unlink()
 
-        task_dir = BASE_DIR / "tasks" / pbi
-        if task_dir.exists():
-            shutil.rmtree(task_dir, ignore_errors=True)
+    def _do_clean():
+        for pbi in ["PBI-501", "PBI-502", "PBI-503", "PBI-504", "PBI-505", "PBI-506"]:
+            clean_id = pbi.lower().replace("-", "_")
+            for comp in ("app", "bff"):
+                test_file = BASE_DIR / "src" / comp / "tests" / f"test_{clean_id}.py"
+                bdd_file = BASE_DIR / "src" / comp / "tests" / f"test_{clean_id}_bdd.py"
+                impl_file = BASE_DIR / "src" / comp / f"{clean_id}_service.py"
+                if test_file.exists():
+                    test_file.unlink()
+                if bdd_file.exists():
+                    bdd_file.unlink()
+                if impl_file.exists():
+                    impl_file.unlink()
+
+            task_dir = BASE_DIR / "tasks" / pbi
+            if task_dir.exists():
+                shutil.rmtree(task_dir, ignore_errors=True)
+
+    _do_clean()
+    yield
+    _do_clean()
 
 
 @pytest.mark.asyncio

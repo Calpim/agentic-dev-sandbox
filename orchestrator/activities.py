@@ -8,7 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from dotenv import load_dotenv
@@ -666,9 +666,115 @@ class {class_name}:
 """
 
 
-async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple[int, str, str]:
-    """非同期サブプロセスで pytest を実行し、Workerのイベントループを停止させない"""
-    cmd = [sys.executable, "-m", "pytest", str(test_file), "-v"]
+async def _call_gemini_for_bdd_steps(
+    pbi_id: str,
+    component: str,
+    feature_content: str,
+    directive_instruction: Optional[str] = None,
+) -> Optional[str]:
+    """Gemini API を利用して Gherkin フィーチャーに対応する pytest-bdd Step Definitions を生成する"""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        model_name = os.getenv("SPEC_BDD_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-2.5-pro"))
+
+        clean_id = _clean_id(pbi_id)
+        service_class = f"{_to_pascal_case(pbi_id)}Service"
+        feat_path_str = (BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature").as_posix()
+
+        directive_section = (
+            f"\n# 直前の失敗に対する改善指示 (Analyzer Directive):\n{directive_instruction}\n"
+            if directive_instruction
+            else ""
+        )
+
+        prompt = f"""あなたは BDD (pytest-bdd) の自動テストエンジニアです。
+以下の Gherkin フィーチャー仕様書を読み、pytest-bdd を用いた受け入れテスト (Step Definitions) の Python コードを生成してください。
+
+# PBI: {pbi_id}
+# 対象コンポーネント: {component}
+# 対象フィーチャー仕様:
+{feature_content}
+{directive_section}
+# 要件:
+1. `from pytest_bdd import scenarios, given, when, then, parsers` をインポートすること。
+2. フィーチャーファイルのパスは `FEATURE_FILE = Path(r"{feat_path_str}")` を定義し、`if FEATURE_FILE.exists(): scenarios(str(FEATURE_FILE))` で読み込むこと。
+3. サービスクラス `{service_class}` は共通インターフェース `def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]` のみを持ちます。未定義のメソッド（open_screen や send_request など）を捏造せず、必ず `service.execute({{"identifier": "{clean_id}-bdd-001"}})` を呼び出してレスポンスを取得し、`assert result.get("success") is True` および `assert result.get("status_code") == 200` を検証してください。
+4. 各ステップは日本語 Gherkin の表記（前提、もし、ならば）に対応させ、`parsers.parse` または `parsers.re` を使用すること。
+5. Python コードのみを出力し、Markdown のコードブロックは不要です。
+"""
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
+        return _strip_markdown_codeblock(response.text)
+    except Exception as e:
+        logger.warning(f"Failed to generate BDD steps via Gemini: {e}")
+        return None
+
+
+def _generate_bdd_step_code(pbi_id: str, component: str, directive_instruction: Optional[str] = None) -> str:
+    """オフライン/フォールバック用の決定論的 pytest-bdd Step Definitions コード生成"""
+    clean_id = _clean_id(pbi_id)
+    service_class = f"{_to_pascal_case(pbi_id)}Service"
+    inst_comment = f"# Directive Note: {directive_instruction}\n" if directive_instruction else ""
+    feat_path_str = (BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature").as_posix()
+
+    return f"""# -*- coding: utf-8 -*-
+{inst_comment}from pathlib import Path
+import pytest
+from pytest_bdd import scenarios, given, when, then, parsers
+from src.{component}.{clean_id}_service import {service_class}
+
+FEATURE_FILE = Path(r"{feat_path_str}")
+
+if FEATURE_FILE.exists():
+    scenarios(str(FEATURE_FILE))
+
+
+@pytest.fixture
+def bdd_context():
+    return {{"service": None, "result": None, "identifier": "{clean_id}-bdd-001"}}
+
+
+@given(parsers.re(r".*"))
+def bdd_given_step(bdd_context):
+    bdd_context["service"] = {service_class}()
+
+
+@when(parsers.re(r".*"))
+def bdd_when_step(bdd_context):
+    service = bdd_context.get("service")
+    if service is None:
+        service = {service_class}()
+        bdd_context["service"] = service
+    bdd_context["result"] = service.execute({{"identifier": bdd_context["identifier"]}})
+
+
+@then(parsers.re(r".*"))
+def bdd_then_step(bdd_context):
+    result = bdd_context.get("result")
+    assert result is not None, "Execution result must not be None"
+    assert result.get("success") is True, f"Expected success but got: {{result}}"
+    assert result.get("status_code") == 200, f"Expected status_code 200 but got: {{result.get('status_code')}}"
+    assert result.get("identifier") == bdd_context["identifier"]
+"""
+
+
+async def _run_pytest_on_target(
+    test_target: Union[Path, List[Path], str], timeout: float = 30.0
+) -> Tuple[int, str, str]:
+    """非同期サブプロセスで pytest を実行し、Workerのイベントループを停止させない (単一または複数ターゲットに対応)"""
+    if isinstance(test_target, list):
+        targets = [str(t) for t in test_target]
+    else:
+        targets = [str(test_target)]
+
+    cmd = [sys.executable, "-m", "pytest", *targets, "-v"]
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{BASE_DIR}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(BASE_DIR)
@@ -716,27 +822,45 @@ async def run_tdd_cycle_activity(
             init_file.write_text("", encoding="utf-8")
 
     test_file = comp_test_dir / f"test_{clean_id}.py"
+    bdd_file = comp_test_dir / f"test_{clean_id}_bdd.py"
     impl_file = comp_src_dir / f"{clean_id}_service.py"
 
     directive_type = directive.get("directive") if directive else None
     directive_inst = directive.get("instruction", "") if directive else None
 
     # ---------------------------------------------------------
-    # 1. RED (失敗するテストコード作成のみ可)
+    # 1. RED (失敗するテストコード作成のみ可: 内側ユニット + 外側受け入れBDD)
     # ---------------------------------------------------------
     # RETRY_IMPL 指定時はテストコードは既存のまま保持し、RED をスキップして GREEN へ進む
     if directive_type != DirectiveType.RETRY_IMPL.value:
         _update_pipeline_phase(pbi_id, component, "RED")
-        logger.info(f"[{component}] TDD Phase: RED - Creating failing tests at {test_file}")
+        logger.info(f"[{component}] TDD Phase: RED - Creating failing tests (inner unit & outer BDD)")
 
         if impl_file.exists():
             impl_file.unlink()
 
+        # 1-a. 内側ループ: ユニットテスト生成
         test_code = _generate_test_code(pbi_id, component, directive_instruction=directive_inst)
         test_file.write_text(test_code, encoding="utf-8")
 
+        # 1-b. 外側ループ: Gherkin から BDD 受け入れテスト生成 (Feature ファイル存在時)
+        feature_file = BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature"
+        has_feature = feature_file.exists()
+        test_targets = [test_file]
+
+        if has_feature:
+            bdd_code = await _call_gemini_for_bdd_steps(
+                pbi_id, component, feature_file.read_text(encoding="utf-8"), directive_instruction=directive_inst
+            )
+            if not bdd_code:
+                bdd_code = _generate_bdd_step_code(pbi_id, component, directive_instruction=directive_inst)
+            bdd_file.write_text(bdd_code, encoding="utf-8")
+            test_targets.append(bdd_file)
+        elif bdd_file.exists():
+            bdd_file.unlink()
+
         # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
-        red_code, red_out, red_err = await _run_pytest_on_target(test_file)
+        red_code, red_out, red_err = await _run_pytest_on_target(test_targets)
         logger.info(
             f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})"
         )
@@ -758,8 +882,10 @@ async def run_tdd_cycle_activity(
     impl_code = _generate_impl_code(pbi_id, component, directive_instruction=directive_inst)
     impl_file.write_text(impl_code, encoding="utf-8")
 
-    # GREEN 検証: テストが通ることを確認 (非同期 & 早期ハンドリング)
-    green_code, green_out, green_err = await _run_pytest_on_target(test_file)
+    test_targets = [test_file, bdd_file] if bdd_file.exists() else [test_file]
+
+    # GREEN 検証: 内側ユニットテストおよび外側BDDテストの両方が通ることを確認
+    green_code, green_out, green_err = await _run_pytest_on_target(test_targets)
     logger.info(
         f"[{component}] Green phase check: exit_code={green_code} (Expect == 0: {'OK' if green_code == 0 else 'FAIL'})"
     )
@@ -771,6 +897,7 @@ async def run_tdd_cycle_activity(
             "tdd_status": "GREEN_FAILED",
             "component": component,
             "test_file": str(test_file),
+            "bdd_test_file": str(bdd_file) if bdd_file.exists() else None,
             "impl_file": str(impl_file),
             "rule_guard": guard_result.to_dict(),
             "verify_output": f"{green_out}\n{green_err}".strip(),
@@ -788,7 +915,7 @@ async def run_tdd_cycle_activity(
     _update_pipeline_phase(pbi_id, component, "VERIFY")
     logger.info(f"[{component}] Phase 5: Verification with Rule Guard (0-token)")
 
-    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_file)
+    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_targets)
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"[{component}] Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
@@ -798,6 +925,7 @@ async def run_tdd_cycle_activity(
             "tdd_status": "ALL_GREEN",
             "component": component,
             "test_file": str(test_file),
+            "bdd_test_file": str(bdd_file) if bdd_file.exists() else None,
             "impl_file": str(impl_file),
             "rule_guard": guard_result.to_dict(),
         }
@@ -807,6 +935,7 @@ async def run_tdd_cycle_activity(
             "tdd_status": "VERIFY_FAILED",
             "component": component,
             "test_file": str(test_file),
+            "bdd_test_file": str(bdd_file) if bdd_file.exists() else None,
             "impl_file": str(impl_file),
             "rule_guard": guard_result.to_dict(),
             "verify_output": f"{verify_out}\n{verify_err}".strip(),
@@ -946,6 +1075,73 @@ def test_{clean_id}_end_to_end_integration():
     assert bff_result.get("success") is True
     assert bff_result.get("status_code") == 200
     assert bff_result.get("identifier") == "{clean_id}-e2e-001"
+"""
+
+
+def _generate_integration_bdd_test_code(pbi_id: str) -> str:
+    """ビジネス層 Gherkin シナリオを実行する結合 BDD 受け入れテストコード生成"""
+    clean_id = _clean_id(pbi_id)
+    app_class = f"{_to_pascal_case(pbi_id)}Service"
+    bff_class = f"{_to_pascal_case(pbi_id)}Service"
+
+    biz_feat_path_str = (BASE_DIR / "specs" / "features" / "business" / f"{pbi_id}.feature").as_posix()
+
+    return f"""# -*- coding: utf-8 -*-
+from pathlib import Path
+import pytest
+from pytest_bdd import scenarios, given, when, then, parsers
+from src.app.{clean_id}_service import {app_class} as AppService
+from src.bff.{clean_id}_service import {bff_class} as BffService
+
+BIZ_FEATURE_FILE = Path(r"{biz_feat_path_str}")
+
+if BIZ_FEATURE_FILE.exists():
+    scenarios(str(BIZ_FEATURE_FILE))
+
+
+@pytest.fixture
+def integ_bdd_context():
+    return {{
+        "app": AppService(),
+        "bff": BffService(),
+        "app_result": None,
+        "bff_result": None,
+        "identifier": "{clean_id}-integ-bdd-001",
+    }}
+
+
+@given(parsers.re(r".*"))
+def integ_given_step(integ_bdd_context):
+    assert integ_bdd_context["app"] is not None
+    assert integ_bdd_context["bff"] is not None
+
+
+@when(parsers.re(r".*"))
+def integ_when_step(integ_bdd_context):
+    app = integ_bdd_context["app"]
+    bff = integ_bdd_context["bff"]
+    ident = integ_bdd_context["identifier"]
+
+    # 1. App 実行
+    app_res = app.execute({{"identifier": ident}})
+    integ_bdd_context["app_result"] = app_res
+
+    # 2. BFF 実行
+    bff_res = bff.execute({{"identifier": app_res.get("identifier")}})
+    integ_bdd_context["bff_result"] = bff_res
+
+
+@then(parsers.re(r".*"))
+def integ_then_step(integ_bdd_context):
+    app_res = integ_bdd_context["app_result"]
+    bff_res = integ_bdd_context["bff_result"]
+
+    assert app_res is not None and app_res.get("success") is True
+    assert app_res.get("status_code") == 200
+
+    assert bff_res is not None and bff_res.get("success") is True
+    assert bff_res.get("status_code") == 200
+    assert bff_res.get("identifier") == integ_bdd_context["identifier"]
 """
 
 
@@ -1101,6 +1297,12 @@ def _build_pr_body(
 """
         reviewer_extra = "\n3. **Analyzer による自己修復 (FIX_TEST / RETRY_IMPL)** が発生したコンポーネントについて、指示内容およびテスト/実装の修正妥当性を重点的にご確認ください。"
 
+    has_integ_bdd = bool(integration_res.get("bdd_test_file"))
+    integ_scope = "App-BFF 契約適合性 ＆ ビジネス Gherkin 受け入れ検証" if has_integ_bdd else "App-BFF 契約適合性検証"
+    bdd_reviewer_note = (
+        f" および結合 BDD テスト (`src/integration/tests/test_{clean_id}_bdd_integration.py`)" if has_integ_bdd else ""
+    )
+
     return f"""## 📌 概要
 自律開発パイプライン (v3.0) により、PBI `{pbi_id}` に対する要件分析から結合テストまでを全自動完了した Pull Request です。
 
@@ -1119,15 +1321,16 @@ def _build_pr_body(
 - [x] **Phase 1: Example Mapping 人間ゲート 1 承認済** (`specs/example-maps/{pbi_id}.md`)
 - [x] **Phase 1-3: App / BFF Gherkin 分解 ＆ @covers タグ付与**
 - [x] **Phase 2: OpenAPI 3.0 スキーマ人間ゲート 2 承認済** (`specs/api/v1/{pbi_id}.yaml`)
-- [{chk_app}] **Phase 4-1 & 4-2: App TDD サイクル** (Rule Guard: `{guard_app}`)
-- [{chk_bff}] **Phase 4-1 & 4-2: BFF TDD サイクル** (Rule Guard: `{guard_bff}`)
-- [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: App-BFF エンドツーエンド契約適合性検証 {integ_label} (`{guard_integ}`)
+- [{chk_app}] **Phase 4-1 & 4-2: App TDD サイクル** (二重ループ: 内側ユニット + 外側 BDD / Rule Guard: `{guard_app}`)
+- [{chk_bff}] **Phase 4-1 & 4-2: BFF TDD サイクル** (二重ループ: 内側ユニット + 外側 BDD / Rule Guard: `{guard_bff}`)
+- [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: {integ_scope} {integ_label} (`{guard_integ}`)
 {analyzer_section}
 ---
 
 ## 👀 レビュアーへの確認ポイント (重点レビュー箇所)
 1. トレーサビリティ表の `BIZ-ID` が、Example Map の受け入れ基準をすべて網羅していることをご確認ください。
-2. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。{reviewer_extra}
+2. 二重ループ TDD の外側受け入れテスト (`src/*/tests/test_{clean_id}_bdd.py`){bdd_reviewer_note} が、Gherkin 仕様の振る舞い要件を正確に検証していることをご確認ください。
+3. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。{reviewer_extra}
 """
 
 
@@ -1184,7 +1387,7 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
 
 @activity.defn
 async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_res: Dict[str, Any]) -> Dict[str, Any]:
-    """Phase 6: 結合検証 (Integration Gate) & Phase 7: GitHub PR 自動作成"""
+    """Phase 6: 結合検証 (Integration Gate: 契約適合 + ビジネス Gherkin BDD) & Phase 7: GitHub PR 自動作成"""
     logger.info(f"Phase 6: Starting Integration Verification and PR creation for {pbi_id}")
     clean_id = _clean_id(pbi_id)
 
@@ -1197,13 +1400,24 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
         if not init_file.exists():
             init_file.write_text("", encoding="utf-8")
 
-    # 2. 結合テストコード生成
+    # 2. 結合テストコード生成 (ユニット結合 + ビジネス Gherkin BDD 結合)
     test_file = integ_test_dir / f"test_{clean_id}_integration.py"
     integ_test_code = _generate_integration_test_code(pbi_id)
     test_file.write_text(integ_test_code, encoding="utf-8")
 
+    biz_feat_file = BASE_DIR / "specs" / "features" / "business" / f"{pbi_id}.feature"
+    test_targets = [test_file]
+    bdd_test_file_path: Optional[str] = None
+
+    if biz_feat_file.exists():
+        bdd_test_file = integ_test_dir / f"test_{clean_id}_bdd_integration.py"
+        integ_bdd_code = _generate_integration_bdd_test_code(pbi_id)
+        bdd_test_file.write_text(integ_bdd_code, encoding="utf-8")
+        test_targets.append(bdd_test_file)
+        bdd_test_file_path = str(bdd_test_file)
+
     # 3. 結合テスト実行 (非同期 pytest)
-    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_file)
+    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_targets)
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"Integration Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
@@ -1212,6 +1426,7 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
         "status": "ALL_GREEN" if is_passed else "FAILED",
         "rule_guard": guard_result.to_dict(),
         "test_file": str(test_file),
+        "bdd_test_file": bdd_test_file_path,
     }
 
     # 4. PR サマリー生成 & tasks/ 保存
@@ -1241,4 +1456,5 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
         "pr_url": pr_url,
         "pr_summary_path": str(pr_file),
         "integration_status": "ALL_GREEN",
+        "bdd_test_file": bdd_test_file_path,
     }

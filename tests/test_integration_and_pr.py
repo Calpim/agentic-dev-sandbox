@@ -17,27 +17,34 @@ from orchestrator.activities import (
 
 @pytest.fixture(autouse=True)
 def cleanup_integration_artifacts():
+    def _do_clean():
+        for pbi in ["PBI-801", "PBI-802", "PBI-803", "PBI-804"]:
+            clean_id = pbi.lower().replace("-", "_")
+            integ_test = BASE_DIR / "src" / "integration" / "tests" / f"test_{clean_id}_integration.py"
+            bdd_integ_test = BASE_DIR / "src" / "integration" / "tests" / f"test_{clean_id}_bdd_integration.py"
+            if integ_test.exists():
+                integ_test.unlink()
+            if bdd_integ_test.exists():
+                bdd_integ_test.unlink()
+
+            # サービスのクリーンアップ
+            for comp in ("app", "bff"):
+                impl = BASE_DIR / "src" / comp / f"{clean_id}_service.py"
+                if impl.exists():
+                    impl.unlink()
+
+            task_dir = BASE_DIR / "tasks" / pbi
+            if task_dir.exists():
+                shutil.rmtree(task_dir, ignore_errors=True)
+
+        # 結合ディレクトリの残存クリーンアップ (Issue 7)
+        integ_dir = BASE_DIR / "src" / "integration"
+        if integ_dir.exists():
+            shutil.rmtree(integ_dir, ignore_errors=True)
+
+    _do_clean()
     yield
-    for pbi in ["PBI-801", "PBI-802", "PBI-803", "PBI-804"]:
-        clean_id = pbi.lower().replace("-", "_")
-        integ_test = BASE_DIR / "src" / "integration" / "tests" / f"test_{clean_id}_integration.py"
-        if integ_test.exists():
-            integ_test.unlink()
-
-        # サービスのクリーンアップ
-        for comp in ("app", "bff"):
-            impl = BASE_DIR / "src" / comp / f"{clean_id}_service.py"
-            if impl.exists():
-                impl.unlink()
-
-        task_dir = BASE_DIR / "tasks" / pbi
-        if task_dir.exists():
-            shutil.rmtree(task_dir, ignore_errors=True)
-
-    # 結合ディレクトリの残存クリーンアップ (Issue 7)
-    integ_dir = BASE_DIR / "src" / "integration"
-    if integ_dir.exists():
-        shutil.rmtree(integ_dir, ignore_errors=True)
+    _do_clean()
 
 
 @pytest.mark.asyncio
