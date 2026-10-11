@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import pathlib, runpy; p = next(x for x in [pathlib.Path('orchestrator/guards/tdd_isolation.py'), pathlib.Path('../orchestrator/guards/tdd_isolation.py')] if x.exists()); runpy.run_path(str(p), run_name='__main__')\"",
+            "command": "python -m orchestrator.guards.tdd_isolation",
             "timeout": 10
           }
         ]
