@@ -1,0 +1,33 @@
+services:
+  temporal:
+    container_name: temporal-server
+    image: temporalio/auto-setup:latest
+    environment:
+      - DB=sqlite
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - temporal-data:/etc/temporal/sqlite
+    networks:
+      - temporal-network
+
+  temporal-ui:
+    container_name: temporal-ui
+    image: temporalio/ui:latest
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8088:8080" # ホスト側 8088 ポートで Web UI を公開
+    depends_on:
+      - temporal
+    networks:
+      - temporal-network
+
+volumes:
+  temporal-data:
+
+networks:
+  temporal-network:
+    driver: bridge
