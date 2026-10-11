@@ -142,6 +142,17 @@ def status(workflow_id: str = typer.Argument(..., help="Workflow ID")):
                     title="Integration Gate Failed",
                 )
             )
+        elif stage == "PIPELINE_FAILED":
+            console.print(
+                Panel(
+                    f"[bold red]パイプラインでエラーまたは人間エスカレーションが発生しました。[/bold red]\n"
+                    f"自律ループが停止されました。\n\n"
+                    f"状態確認: `tasks/{pbi_id}/state.json`\n"
+                    f"ディレクティブ確認: `tasks/{pbi_id}/*/plan.md`\n"
+                    f"監査ログ: `tasks/{pbi_id}/audit.jsonl`",
+                    title="Pipeline Interrupted",
+                )
+            )
 
     asyncio.run(_run())
 
