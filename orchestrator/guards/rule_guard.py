@@ -108,7 +108,7 @@ def classify_execution_output(
 
     # 4. Lint / スタイルエラー (flake8, eslint, ruff)
     lint_patterns = [
-        r"(?:[A-Za-z0-9_-]+\.py):\d+:\d+:\s*(?:E\d{3}|W\d{3}|F\d{3})\s*(.+)",
+        r"(?:[^\s:]+\.py):\d+:\d+:\s*(?:[A-Z]\d{3,4}|[A-Z]+[0-9]+)\s*(.+)",
         r"ESLint:\s*\d+ problems?",
         r"rule violation:\s*(.+)",
         r"line \d+, col \d+, Error - (.+)",

@@ -39,6 +39,14 @@ def test_rule_guard_lint_error():
     assert "Lint" in res.summary
 
 
+def test_rule_guard_ruff_isort_lint_error():
+    stdout = "src/app/pbi_101_service.py:12:1: I001 [*] Import block is un-sorted or un-formatted"
+    res = classify_execution_output(exit_code=1, stdout=stdout)
+    assert res.category == ErrorCategory.LINT_ERROR
+    assert res.next_action == NextAction.DIRECT_FIX
+    assert "I001" in res.summary
+
+
 def test_rule_guard_test_failure_within_budget():
     stdout = """============================= FAILURES =============================
 ___________________________ test_user_auth ___________________________
