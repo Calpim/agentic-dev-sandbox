@@ -6,6 +6,9 @@ from typing import Dict, Any, Optional
 
 from temporalio import activity
 
+from dotenv import load_dotenv
+
+load_dotenv()
 logger = logging.getLogger("orchestrator.activities")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,20 +16,78 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def _ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
+def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> Optional[str]:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        
+        prompt = f"""あなたは BDD / Example Mapping の専門家「Spec Agent」です。
+以下のPBI要件を分析し、受け入れ条件を明確化するための「Example Map」を日本語のMarkdown形式で作成してください。
+
+# PBI 識別子: {pbi_id}
+# 要件概要:
+{pbi_content}
+"""
+        if feedback:
+            prompt += f"""
+# 人間からの修正指示（最優先で反映してください）:
+{feedback}
+"""
+
+        prompt += """
+# 必須フォーマット
+以下の構成を厳密に守ってください。
+1. タイトル (# Example Map: {pbi_id})
+2. PBI 要件概要 (## PBI 要件概要)
+3. ルール定義 (## BIZ-001: [ルール名], ## BIZ-002: [ルール名], ...)
+   - 各ルールの下に、具体例を表形式 (| ルール | 具体例 (Example) | 期待される結果 |) で記載。正常系、異常系、境界値を網羅すること。
+4. 人間への確認事項 (## ❓ AIからの確認事項 (Human-in-the-Loop))
+   - 曖昧な仕様やエッジケース、境界値、エラーハンドリングに関して、人間に確認すべき鋭い質問を 2〜4 件箇条書き (- [ ] Q1. ...) で挙げること。
+"""
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return response.text
+    except Exception as e:
+        logger.warning(f"Failed to generate example map via Gemini API: {e}")
+        return None
+
 @activity.defn
 async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> str:
-    """Phase 1-1: Example Map 生成 Activity"""
+    """Phase 1-1: Example Map 生成 Activity (Gemini API 結合 & フィードバック反映)"""
     logger.info(f"Generating Example Map for {pbi_id} (feedback: {feedback})")
     
     target_dir = BASE_DIR / "specs" / "example-maps"
     _ensure_dir(target_dir)
     target_file = target_dir / f"{pbi_id}.md"
 
-    # プロンプトや指示にフィードバックを含める
-    feedback_note = f"\n> 前回のフィードバック: {feedback}\n" if feedback else ""
+    # 1. 本物の LLM (Gemini API) 呼び出しを試行
+    llm_output = _call_gemini_for_example_map(pbi_id, pbi_content, feedback)
+    
+    if llm_output:
+        logger.info("Successfully generated Example Map via Gemini API!")
+        target_file.write_text(llm_output, encoding="utf-8")
+        return str(target_file)
+
+    # 2. フォールバック生成（APIキー未設定またはエラー時：フィードバックを動的解析）
+    logger.info("Generating Example Map via fallback template generator...")
+    feedback_section = ""
+    extra_rule = ""
+    if feedback:
+        feedback_section = f"\n> ↺ 【修正指示を反映】: {feedback}\n"
+        extra_rule = f"""
+## BIZ-003 (フィードバック反映): 追加要件の適用
+| ルール | 具体例 (Example) | 期待される結果 |
+| :--- | :--- | :--- |
+| 指示内容の遵守 | {feedback} に従った入力・操作 | 指定通りのバリデーションおよび振る舞いが成立する |
+"""
 
     content = f"""# Example Map: {pbi_id}
-{feedback_note}
+{feedback_section}
 ## PBI 要件概要
 {pbi_content}
 
@@ -39,12 +100,11 @@ async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback:
 | ルール | 具体例 (Example) | 期待される結果 |
 | :--- | :--- | :--- |
 | 重複・不正入力の遮断 | 既存のリソースと競合する識別子を指定 | エラー (409 Conflict) を返却する |
-
+{extra_rule}
 ## ❓ AIからの確認事項 (Human-in-the-Loop)
 - [ ] Q1. 境界値（上限文字数）に達した際の挙動はエラーとするか、自動切り詰めとするか？
 - [ ] Q2. 認証トークンの有効期限切れ時のフォールバック処理は定義されているか？
 """
-
     target_file.write_text(content, encoding="utf-8")
     return str(target_file)
 
