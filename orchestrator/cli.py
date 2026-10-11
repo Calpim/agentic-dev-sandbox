@@ -99,6 +99,16 @@ def status(workflow_id: str = typer.Argument(..., help="Workflow ID")):
                 f"修正指示する場合: `python orchestrator/cli.py reject-schema {workflow_id} --feedback \"指示内容\"`",
                 title="Action Required: Gate 2"
             ))
+        elif stage == "COMPLETED":
+            pr_url = status_data.get("pr_url")
+            summary_path = status_data.get("pr_summary_path", f"tasks/{pbi_id}/PR_SUMMARY.md")
+            pr_msg = f"[bold green]GitHub PR: [link={pr_url}]{pr_url}[/link][/bold green]\n" if pr_url else "[dim]GitHub PR: 未作成（ローカルサマリーのみ）[/dim]\n"
+            console.print(Panel(
+                f"[bold green]すべてのパイプライン（要件・契約・TDD・結合検証）が完了しました！[/bold green]\n\n"
+                f"{pr_msg}"
+                f"サマリーレポート: `{summary_path}`",
+                title="Pipeline Completed"
+            ))
     asyncio.run(_run())
 
 @app.command()
