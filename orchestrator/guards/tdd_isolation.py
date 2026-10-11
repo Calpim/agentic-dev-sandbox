@@ -10,8 +10,45 @@ import json
 import os
 import re
 
-TEST_PATTERN = re.compile(r"(\.spec\.|\.test\.|__tests__/|Test\.[a-zA-Z]+$)")
+from pathlib import Path
+
+TEST_PATTERN = re.compile(
+    r"(\.spec\.[a-zA-Z0-9]+$|\.test\.[a-zA-Z0-9]+$|__tests__/|[/\\]tests?[/\\]|([/\\]|^)test_[^/\\]+\.py$|([/\\]|^)[^/\\]+_test\.py$|Test\.[a-zA-Z]+$)",
+    re.IGNORECASE,
+)
 SCHEMA_PATTERN = re.compile(r"specs[/\\]api[/\\]")
+
+def get_current_phase(norm_path: str) -> str:
+    """環境変数または tasks/**/state.json から現在のTDDフェーズを特定する"""
+    # 1. 環境変数からの取得
+    env_phase = os.environ.get("TDD_PHASE", "").strip().upper()
+    if env_phase:
+        return env_phase
+
+    # 2. state.json からの判定
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    tasks_dir = repo_root / "tasks"
+    if tasks_dir.exists():
+        for pbi_dir in tasks_dir.iterdir():
+            state_file = pbi_dir / "state.json"
+            if state_file.is_file():
+                try:
+                    state_data = json.loads(state_file.read_text(encoding="utf-8"))
+                    pipelines = state_data.get("pipelines", {})
+                    # パスに app または bff が含まれているか確認
+                    comp = "app" if ("app/" in norm_path or "/app" in norm_path) else "bff" if ("bff/" in norm_path or "/bff" in norm_path) else None
+                    if comp and comp in pipelines:
+                        p_phase = pipelines[comp].get("phase", "").upper()
+                        if p_phase in ("RED", "GREEN", "REFACTOR"):
+                            return p_phase
+                    # コンポーネント特定できない場合はアクティブなフェーズを探索
+                    for c in ("app", "bff"):
+                        c_phase = pipelines.get(c, {}).get("phase", "").upper()
+                        if c_phase in ("RED", "GREEN", "REFACTOR"):
+                            return c_phase
+                except Exception:
+                    pass
+    return ""
 
 def respond(decision: str, reason: str = ""):
     output = {"decision": decision}
@@ -46,8 +83,7 @@ def main():
             )
 
         # 2. 現在のフェーズの取得 (環境変数 TDD_PHASE または state.json から判定)
-        # 環境変数がなければ安全のため allow
-        current_phase = os.environ.get("TDD_PHASE", "").upper()
+        current_phase = get_current_phase(norm_path)
         if not current_phase:
             respond("allow")
 

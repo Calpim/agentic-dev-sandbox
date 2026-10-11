@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 
 from temporalio.client import Client
@@ -19,10 +20,10 @@ from orchestrator.activities import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("orchestrator.worker")
 
-TASK_QUEUE = "ai-dev-task-queue"
+TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "ai-dev-task-queue")
 
 async def main():
-    temporal_address = "localhost:7233"
+    temporal_address = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
     logger.info(f"Connecting to Temporal Server at {temporal_address}...")
     
     try:

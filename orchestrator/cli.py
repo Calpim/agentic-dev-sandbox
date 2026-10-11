@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 from typing import Optional
 import typer
@@ -10,8 +11,8 @@ from temporalio.client import Client
 app = typer.Typer(help="AI-Driven Autonomous Development CLI (Temporal Orchestrator)")
 console = Console()
 
-TASK_QUEUE = "ai-dev-task-queue"
-TEMPORAL_ADDRESS = "localhost:7233"
+TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "ai-dev-task-queue")
+TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
 
 async def get_client() -> Client:
     try:
@@ -63,7 +64,6 @@ def status(workflow_id: str = typer.Argument(..., help="Workflow ID")):
 
         table = Table(title=f"Workflow Status: {workflow_id}")
         table.add_column("項目", style="cyan")
-        table.add_value = table.add_row
         table.add_row("PBI ID", status_data.get("pbi_id", ""))
         table.add_row("現在のステージ", f"[bold yellow]{status_data.get('stage', '')}[/bold yellow]")
         

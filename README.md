@@ -38,7 +38,7 @@ flowchart TD
 ## 2. ディレクトリ構成
 
 ```text
-D:\AI\workspace\ai-driven-workflow\
+.
 ├── docs/
 │   ├── WORKFLOW.md           # ワークフロー詳細仕様書 (v3.0)
 │   └── ROADMAP.md            # 段階的導入ロードマップ (P0〜P3)

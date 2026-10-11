@@ -197,31 +197,56 @@ async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
 """
         plan_file.write_text(plan_content, encoding="utf-8")
 
+def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS"):
+    """tasks/{pbi_id}/state.json のパイプラインフェーズを更新する"""
+    state_file = BASE_DIR / "tasks" / pbi_id / "state.json"
+    if state_file.exists():
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            if component in data.get("pipelines", {}):
+                data["pipelines"][component]["phase"] = phase
+                data["pipelines"][component]["status"] = status
+                state_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to update state.json: {e}")
+
 @activity.defn
 async def run_design_activity(pbi_id: str, component: str) -> Dict[str, Any]:
-    """Phase 4-1: DDD / 設計フェーズ"""
+    """Phase 4-1: DDD / 設計フェーズ (Skeleton)
+    
+    NOTE: 現在はパイプライン骨組みのスタブ実装です。
+    将来的に Google Antigravity Agent CLI / SDK を呼び出し、DDD 設計書を生成します。
+    """
     logger.info(f"Running Design activity for {pbi_id} / {component}")
-    # Antigravity Agent を呼び出して設計ドキュメント等を生成可能
+    _update_pipeline_phase(pbi_id, component, "DESIGN", "IN_PROGRESS")
     return {"design_status": "COMPLETED", "component": component}
 
 @activity.defn
 async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dict[str, Any]) -> Dict[str, Any]:
-    """Phase 4-2: TDD サイクル (Red -> Green -> Refactor)"""
+    """Phase 4-2: TDD サイクル (Red -> Green -> Refactor)
+    
+    NOTE: 現在はパイプライン骨組みのシミュレーション実装です。
+    各フェーズで state.json の phase を更新し、Antigravity の Hook (tdd_isolation) と連動します。
+    将来的に Antigravity Agent を headless で呼び出して実装を行います。
+    """
     logger.info(f"Running TDD cycle for {pbi_id} / {component}")
     
-    # 権限分離のシミュレーション: フェーズごとに環境変数を切り替え
     # 1. RED (テスト作成のみ可)
+    _update_pipeline_phase(pbi_id, component, "RED")
     os.environ["TDD_PHASE"] = "RED"
     logger.info(f"[{component}] TDD Phase: RED - Creating failing tests")
 
     # 2. GREEN (プロダクション実装のみ可、テスト改ざん不可)
+    _update_pipeline_phase(pbi_id, component, "GREEN")
     os.environ["TDD_PHASE"] = "GREEN"
     logger.info(f"[{component}] TDD Phase: GREEN - Implementing solution to pass tests")
 
     # 3. REFACTOR
+    _update_pipeline_phase(pbi_id, component, "REFACTOR")
     os.environ["TDD_PHASE"] = "REFACTOR"
     logger.info(f"[{component}] TDD Phase: REFACTOR - Code cleanup")
 
+    _update_pipeline_phase(pbi_id, component, "VERIFY", "COMPLETED")
     os.environ["TDD_PHASE"] = ""
     return {"tdd_status": "ALL_GREEN", "component": component}
 

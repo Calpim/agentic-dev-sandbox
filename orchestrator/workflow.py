@@ -75,9 +75,12 @@ class PBIDevelopmentWorkflow:
         retry_policy = RetryPolicy(maximum_attempts=3)
         
         while not self.state.example_map_approved:
+            feedback_to_apply = self.state.example_map_feedback
+            self.state.example_map_feedback = None
+
             example_map_path = await workflow.execute_activity(
                 "generate_example_map_activity",
-                args=[pbi_id, pbi_content, self.state.example_map_feedback],
+                args=[pbi_id, pbi_content, feedback_to_apply],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=retry_policy,
             )
@@ -109,9 +112,12 @@ class PBIDevelopmentWorkflow:
         # ---------------------------------------------------------
         self.state.stage = "PHASE_2_SCHEMA_DRAFT"
         while not self.state.schema_approved:
+            feedback_to_apply = self.state.schema_feedback
+            self.state.schema_feedback = None
+
             schema_path = await workflow.execute_activity(
                 "draft_schema_activity",
-                args=[pbi_id, decomp_result, self.state.schema_feedback],
+                args=[pbi_id, decomp_result, feedback_to_apply],
                 start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=retry_policy,
             )
@@ -138,12 +144,12 @@ class PBIDevelopmentWorkflow:
         # ---------------------------------------------------------
         self.state.stage = "PHASE_3_4_PARALLEL_EXECUTION"
         app_task = workflow.execute_child_workflow(
-            ComponentPipelineWorkflow.run,
+            ComponentPipelineWorkflow,
             args=[pbi_id, "app"],
             id=f"{pbi_id}-pipeline-app",
         )
         bff_task = workflow.execute_child_workflow(
-            ComponentPipelineWorkflow.run,
+            ComponentPipelineWorkflow,
             args=[pbi_id, "bff"],
             id=f"{pbi_id}-pipeline-bff",
         )
