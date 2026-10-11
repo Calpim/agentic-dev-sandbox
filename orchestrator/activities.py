@@ -1,28 +1,22 @@
-import os
-import sys
 import asyncio
-import subprocess
 import json
 import logging
+import os
 import re
-import yaml
-import urllib.request
+import subprocess
+import sys
 import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-def _to_pascal_case(identifier: str) -> str:
-    """ハイフンやアンダースコア区切りの文字列を PascalCase / CamelCase に変換する"""
-    return re.sub(r"[^a-zA-Z0-9]+", " ", identifier).title().replace(" ", "")
-
+import yaml
+from dotenv import load_dotenv
 from temporalio import activity
 
-from dotenv import load_dotenv
-
 from orchestrator.guards.rule_guard import (
-    classify_execution_output,
-    ErrorCategory,
     NextAction,
+    classify_execution_output,
 )
 
 load_dotenv()
@@ -30,11 +24,20 @@ logger = logging.getLogger("orchestrator.activities")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _to_pascal_case(identifier: str) -> str:
+    """ハイフンやアンダースコア区切りの文字列を PascalCase / CamelCase に変換する"""
+    return re.sub(r"[^a-zA-Z0-9]+", " ", identifier).title().replace(" ", "")
+
+
 def _ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
-def _strip_markdown_codeblock(text: str) -> str:
+
+def _strip_markdown_codeblock(text: Optional[str]) -> str:
     """LLM が出力した Markdown コードブロック (```markdown ... ```) を除去する"""
+    if not text:
+        return ""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
@@ -45,15 +48,17 @@ def _strip_markdown_codeblock(text: str) -> str:
         cleaned = "\n".join(lines).strip()
     return cleaned
 
+
 async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         model_name = os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash")
-        
+
         prompt = f"""あなたは BDD / Example Mapping の専門家「Spec Agent」です。
 以下のPBI要件を分析し、受け入れ条件を明確化するための「Example Map」を日本語のMarkdown形式で作成してください。
 
@@ -86,18 +91,19 @@ async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: 
         logger.warning(f"Failed to generate example map via Gemini API: {e}")
         return None
 
+
 @activity.defn
 async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> str:
     """Phase 1-1: Example Map 生成 Activity (Gemini API 結合 & フィードバック反映)"""
     logger.info(f"Generating Example Map for {pbi_id} (feedback: {feedback})")
-    
+
     target_dir = BASE_DIR / "specs" / "example-maps"
     _ensure_dir(target_dir)
     target_file = target_dir / f"{pbi_id}.md"
 
     # 1. 本物の LLM (Gemini API) 呼び出しを試行 (非同期)
     llm_output = await _call_gemini_for_example_map(pbi_id, pbi_content, feedback)
-    
+
     if llm_output:
         logger.info("Successfully generated Example Map via Gemini API!")
         sanitized_output = _strip_markdown_codeblock(llm_output)
@@ -139,15 +145,17 @@ async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback:
     target_file.write_text(content, encoding="utf-8")
     return str(target_file)
 
+
 async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) -> Optional[Dict[str, str]]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         model_name = os.getenv("SPEC_DECOMPOSE_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash"))
-        
+
         prompt = f"""あなたは BDD 仕様分解の専門家「Spec Decomposition Agent」です。
 以下の承認済み「Example Map」を入力とし、3つの層（ビジネス層、App層、BFF層）の Gherkin シナリオを作成してください。
 
@@ -188,11 +196,12 @@ async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) 
         logger.warning(f"Failed to decompose specs via Gemini API: {e}")
         return None
 
+
 @activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
     """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
     logger.info(f"Decomposing specs for {pbi_id} from {example_map_path}")
-    
+
     biz_dir = BASE_DIR / "specs" / "features" / "business"
     app_dir = BASE_DIR / "specs" / "features" / "app"
     bff_dir = BASE_DIR / "specs" / "features" / "bff"
@@ -208,11 +217,11 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
         biz_file = biz_dir / f"{pbi_id}.feature"
         app_file = app_dir / f"{pbi_id}.feature"
         bff_file = bff_dir / f"{pbi_id}.feature"
-        
+
         biz_file.write_text(llm_specs["business"], encoding="utf-8")
         app_file.write_text(llm_specs["app"], encoding="utf-8")
         bff_file.write_text(llm_specs["bff"], encoding="utf-8")
-        
+
         return {
             "business": str(biz_file),
             "app": str(app_file),
@@ -222,10 +231,10 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     # 2. フォールバック生成: Example Map から BIZ-ID を動的に抽出して展開
     logger.info("Decomposing specs via dynamic fallback parser...")
     biz_matches = re.findall(r"##\s+(BIZ-\d+)(?::\s*|\s+)(.+)", example_map_content)
-    
+
     biz_rules_gherkin = []
     covers_tags = []
-    
+
     if biz_matches:
         for biz_id, rule_desc in biz_matches:
             covers_tags.append(f"@covers:{biz_id}")
@@ -255,24 +264,30 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
 
     # 2. App層 Gherkin
     app_file = app_dir / f"{pbi_id}.feature"
-    app_file.write_text(f"""# language: ja
+    app_file.write_text(
+        f"""# language: ja
 {covers_header}
 機能: {pbi_id} クライアントUI振る舞い
   シナリオ: ユーザーインターフェース操作と状態変化
     前提 画面が表示されている
     もし 操作を実行する
     ならば 画面に結果が適切に反映される
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     # 3. BFF層 Gherkin
     bff_file = bff_dir / f"{pbi_id}.feature"
-    bff_file.write_text(f"""# language: ja
+    bff_file.write_text(
+        f"""# language: ja
 {covers_header}
 機能: {pbi_id} APIエンドポイント連携
   シナリオ: リクエスト処理とスキーマ適合レスポンス
     もし APIリクエストが送信される
     ならば ステータスコードとJSONが返却される
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     return {
         "business": str(biz_file),
@@ -280,20 +295,19 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
         "bff": str(bff_file),
     }
 
+
 async def _call_gemini_for_openapi(
-    pbi_id: str,
-    bff_gherkin: str,
-    biz_gherkin: str,
-    feedback: Optional[str] = None
+    pbi_id: str, bff_gherkin: str, biz_gherkin: str, feedback: Optional[str] = None
 ) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         model_name = os.getenv("DESIGN_AGENT_MODEL") or os.getenv("SPEC_AGENT_MODEL") or "gemini-3.8-flash"
-        
+
         prompt = f"""あなたは API 仕様設計の専門家「Design Agent」です。
 以下の入力情報から、OpenAPI 3.0.3 規格に完全準拠した REST API スキーマ（YAML形式）を策定してください。
 
@@ -337,6 +351,7 @@ async def _call_gemini_for_openapi(
     except Exception as e:
         logger.warning(f"Failed to draft OpenAPI schema via Gemini API: {e}")
         return None
+
 
 def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[str] = None) -> str:
     """API キー未設定時やエラー時の動的フォールバック OpenAPI 生成 (安全な辞書ダンプ)"""
@@ -389,7 +404,10 @@ def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[st
                                         "type": "object",
                                         "properties": {
                                             "success": {"type": "boolean", "example": True},
-                                            "data": {"type": "object", "example": {"status": "completed", "pbi": pbi_id}},
+                                            "data": {
+                                                "type": "object",
+                                                "example": {"status": "completed", "pbi": pbi_id},
+                                            },
                                         },
                                     }
                                 }
@@ -424,6 +442,7 @@ def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[st
     }
     return yaml.safe_dump(schema_dict, allow_unicode=True, sort_keys=False)
 
+
 @activity.defn
 async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feedback: Optional[str] = None) -> str:
     """Phase 2-1: OpenAPI スキーマ ドラフト (Gemini API 結合 & 人間フィードバック反映)"""
@@ -452,6 +471,7 @@ async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feed
     schema_file.write_text(fallback_content, encoding="utf-8")
     return str(schema_file)
 
+
 @activity.defn
 async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
     """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化"""
@@ -467,7 +487,7 @@ async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
         "pipelines": {
             "app": {"phase": "INIT", "status": "PLANNED"},
             "bff": {"phase": "INIT", "status": "PLANNED"},
-        }
+        },
     }
     state_file.write_text(json.dumps(state_data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -491,6 +511,7 @@ async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
 """
         plan_file.write_text(plan_content, encoding="utf-8")
 
+
 def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS"):
     """tasks/{pbi_id}/state.json のパイプラインフェーズを更新する"""
     state_file = BASE_DIR / "tasks" / pbi_id / "state.json"
@@ -504,15 +525,17 @@ def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str 
         except Exception as e:
             logger.warning(f"Failed to update state.json: {e}")
 
+
 async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str, schema_content: str) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         model_name = os.getenv("DESIGN_AGENT_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash"))
-        
+
         prompt = f"""あなたは DDD およびアーキテクチャ設計の専門家「Design Agent」です。
 以下の Gherkin 仕様と OpenAPI 契約を基に、{component.upper()} 層の実装設計書 (Markdown形式) を策定してください。
 
@@ -540,6 +563,7 @@ async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str
         logger.warning(f"Failed to generate design doc via Gemini API: {e}")
         return None
 
+
 def _fallback_design_doc(pbi_id: str, component: str, spec_content: str) -> str:
     clean_name = _to_pascal_case(pbi_id)
     return f"""# Architecture & DDD Design: {pbi_id} ({component.upper()})
@@ -559,6 +583,7 @@ def _fallback_design_doc(pbi_id: str, component: str, spec_content: str) -> str:
 - GREEN: 最小限のビジネスロジックとマッピングを実装。
 - REFACTOR: コード構造の整理、型ヒントの追加。
 """
+
 
 @activity.defn
 async def run_design_activity(pbi_id: str, component: str) -> Dict[str, Any]:
@@ -586,8 +611,10 @@ async def run_design_activity(pbi_id: str, component: str) -> Dict[str, Any]:
         "design_path": str(design_file),
     }
 
+
 def _clean_id(pbi_id: str) -> str:
     return pbi_id.lower().replace("-", "_")
+
 
 def _generate_test_code(pbi_id: str, component: str) -> str:
     clean_id = _clean_id(pbi_id)
@@ -607,19 +634,19 @@ def test_{clean_id}_validation_error():
         service.execute({{}})
 """
 
+
 def _generate_impl_code(pbi_id: str, component: str) -> str:
-    clean_id = _clean_id(pbi_id)
     class_name = f"{_to_pascal_case(pbi_id)}Service"
     return f"""from typing import Dict, Any
 
 class {class_name}:
     \"\"\"Auto-generated service implementation for {pbi_id} ({component})\"\"\"
-    
+
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         identifier = payload.get("identifier")
         if not identifier:
             raise ValueError("identifier is required")
-        
+
         return {{
             "success": True,
             "status_code": 200,
@@ -627,6 +654,7 @@ class {class_name}:
             "component": "{component}",
         }}
 """
+
 
 async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple[int, str, str]:
     """非同期サブプロセスで pytest を実行し、Workerのイベントループを停止させない"""
@@ -644,7 +672,8 @@ async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple
             env=env,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return proc.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+        ret_code = proc.returncode if proc.returncode is not None else 1
+        return ret_code, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
     except asyncio.TimeoutError:
         try:
             proc.kill()
@@ -653,16 +682,17 @@ async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple
             pass
         return -1, "", f"TimeoutError: pytest execution timed out after {timeout} seconds"
 
+
 @activity.defn
 async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 4-2 & 5: TDD サイクル (Red -> Green -> Refactor -> Verify with Rule Guard)"""
     logger.info(f"Running TDD cycle for {pbi_id} / {component}")
     clean_id = _clean_id(pbi_id)
-    
+
     comp_src_dir = BASE_DIR / "src" / component
     comp_test_dir = comp_src_dir / "tests"
     _ensure_dir(comp_test_dir)
-    
+
     # Python パッケージ初期化 (__init__.py)
     for d in (BASE_DIR / "src", comp_src_dir, comp_test_dir):
         init_file = d / "__init__.py"
@@ -677,7 +707,7 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "RED")
     logger.info(f"[{component}] TDD Phase: RED - Creating failing tests at {test_file}")
-    
+
     if impl_file.exists():
         impl_file.unlink()
 
@@ -686,7 +716,9 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
 
     # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
     red_code, red_out, red_err = await _run_pytest_on_target(test_file)
-    logger.info(f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})")
+    logger.info(
+        f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})"
+    )
     if red_code == 0:
         logger.error(f"[{component}] TDD RED phase violation: Tests passed unexpectedly without implementation.")
         _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
@@ -707,7 +739,9 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
 
     # GREEN 検証: テストが通ることを確認 (非同期 & 早期ハンドリング)
     green_code, green_out, green_err = await _run_pytest_on_target(test_file)
-    logger.info(f"[{component}] Green phase check: exit_code={green_code} (Expect == 0: {'OK' if green_code == 0 else 'FAIL'})")
+    logger.info(
+        f"[{component}] Green phase check: exit_code={green_code} (Expect == 0: {'OK' if green_code == 0 else 'FAIL'})"
+    )
     if green_code != 0:
         logger.warning(f"[{component}] TDD GREEN phase failed: exit_code={green_code}")
         guard_result = classify_execution_output(exit_code=green_code, stdout=green_out, stderr=green_err)
@@ -746,6 +780,7 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
         "rule_guard": guard_result.to_dict(),
     }
 
+
 def _generate_integration_test_code(pbi_id: str) -> str:
     clean_id = _clean_id(pbi_id)
     app_class = f"{_to_pascal_case(pbi_id)}Service"
@@ -769,6 +804,7 @@ def test_{clean_id}_end_to_end_integration():
     assert bff_result.get("status_code") == 200
     assert bff_result.get("identifier") == "{clean_id}-e2e-001"
 """
+
 
 def _get_github_token() -> Optional[str]:
     """環境変数または git credential helper から GitHub トークンを取得する"""
@@ -805,6 +841,7 @@ def _get_github_token() -> Optional[str]:
                 pass
         return None
 
+
 def _get_repo_slug() -> str:
     """現在の git リポジトリのスラッグ (owner/repo) を取得する (環境変数 GITHUB_REPOSITORY 優先)"""
     repo = os.environ.get("GITHUB_REPOSITORY")
@@ -828,6 +865,7 @@ def _get_repo_slug() -> str:
         pass
     return "Calpim/agentic-dev-sandbox"
 
+
 def _get_current_branch() -> str:
     """現在のブランチ名を取得する"""
     try:
@@ -843,6 +881,7 @@ def _get_current_branch() -> str:
         return proc.stdout.strip() or "main"
     except Exception:
         return "main"
+
 
 def _build_pr_body(
     pbi_id: str,
@@ -863,9 +902,9 @@ def _build_pr_body(
         biz_rules = [("BIZ-001", "基本機能振る舞い")]
 
     # 各パイプラインおよび結合検証の成否判定 (Issue 3: 動的判定)
-    app_ok = (app_res.get("status") == "SUCCESS" or app_res.get("tdd_status") == "ALL_GREEN")
-    bff_ok = (bff_res.get("status") == "SUCCESS" or bff_res.get("tdd_status") == "ALL_GREEN")
-    integ_ok = (integration_res.get("status") == "ALL_GREEN")
+    app_ok = app_res.get("status") == "SUCCESS" or app_res.get("tdd_status") == "ALL_GREEN"
+    bff_ok = bff_res.get("status") == "SUCCESS" or bff_res.get("tdd_status") == "ALL_GREEN"
+    integ_ok = integration_res.get("status") == "ALL_GREEN"
     all_ok = app_ok and bff_ok and integ_ok
 
     status_badge = "✅ ALL GREEN" if all_ok else "❌ FAILED"
@@ -915,6 +954,7 @@ def _build_pr_body(
 2. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。
 """
 
+
 def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
     """GitHub REST API を通じて Pull Request を自動作成する"""
     token = _get_github_token()
@@ -931,12 +971,14 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
         return None
 
     url = f"https://api.github.com/repos/{repo_slug}/pulls"
-    payload = json.dumps({
-        "title": title,
-        "head": branch,
-        "base": base_branch,
-        "body": body,
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "title": title,
+            "head": branch,
+            "base": base_branch,
+            "body": body,
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -963,6 +1005,7 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
         logger.warning(f"Failed to create GitHub PR: {e}")
         return None
 
+
 @activity.defn
 async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_res: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6: 結合検証 (Integration Gate) & Phase 7: GitHub PR 自動作成"""
@@ -988,7 +1031,7 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"Integration Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
-    is_passed = (guard_result.next_action == NextAction.PROCEED)
+    is_passed = guard_result.next_action == NextAction.PROCEED
     integration_res = {
         "status": "ALL_GREEN" if is_passed else "FAILED",
         "rule_guard": guard_result.to_dict(),

@@ -5,11 +5,10 @@ Prevents test manipulation during Green/Refactor and prevents production edits d
 Also protects OpenAPI specs from direct modifications.
 """
 
-import sys
 import json
 import os
 import re
-
+import sys
 from pathlib import Path
 
 TEST_PATTERN = re.compile(
@@ -17,6 +16,7 @@ TEST_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SCHEMA_PATTERN = re.compile(r"specs[/\\]api[/\\]")
+
 
 def get_current_phase(norm_path: str) -> str:
     """tasks/**/state.json からコンポーネントに応じたTDDフェーズを特定する (環境変数はフォールバック)"""
@@ -32,7 +32,13 @@ def get_current_phase(norm_path: str) -> str:
                     state_data = json.loads(state_file.read_text(encoding="utf-8"))
                     pipelines = state_data.get("pipelines", {})
                     # パスに app または bff が含まれているか確認
-                    comp = "app" if ("app/" in norm_path or "/app" in norm_path) else "bff" if ("bff/" in norm_path or "/bff" in norm_path) else None
+                    comp = (
+                        "app"
+                        if ("app/" in norm_path or "/app" in norm_path)
+                        else "bff"
+                        if ("bff/" in norm_path or "/bff" in norm_path)
+                        else None
+                    )
                     if comp and comp in pipelines:
                         p_phase = pipelines[comp].get("phase", "").upper()
                         if p_phase in ("RED", "GREEN", "REFACTOR"):
@@ -52,12 +58,14 @@ def get_current_phase(norm_path: str) -> str:
 
     return ""
 
+
 def respond(decision: str, reason: str = ""):
     output = {"decision": decision}
     if reason:
         output["reason"] = reason
     print(json.dumps(output))
     sys.exit(0)
+
 
 def main():
     try:
@@ -67,7 +75,6 @@ def main():
 
         payload = json.loads(raw_input)
         tool_call = payload.get("toolCall", {})
-        tool_name = tool_call.get("name", "")
         args = tool_call.get("args", {})
 
         # 対象ファイルパスの取得
@@ -81,7 +88,7 @@ def main():
         if SCHEMA_PATTERN.search(norm_path):
             respond(
                 "deny",
-                "スキーマファイル (specs/api/**) の直接変更は禁止されています。スキーマ変更が必要な場合は差分PRまたはオーケストレーターへのエスカレーションを行ってください。"
+                "スキーマファイル (specs/api/**) の直接変更は禁止されています。スキーマ変更が必要な場合は差分PRまたはオーケストレーターへのエスカレーションを行ってください。",
             )
 
         # 2. 現在のフェーズの取得 (環境変数 TDD_PHASE または state.json から判定)
@@ -96,7 +103,7 @@ def main():
             if not is_test_file:
                 respond(
                     "deny",
-                    f"現在 【RED】 フェーズです。プロダクションコード ({target_file}) の編集は禁止されています。失敗するテストコードのみを作成してください。"
+                    f"現在 【RED】 フェーズです。プロダクションコード ({target_file}) の編集は禁止されています。失敗するテストコードのみを作成してください。",
                 )
 
         # Green / Refactor フェーズ: テストの変更は禁止（テスト緩和の防止）
@@ -104,7 +111,7 @@ def main():
             if is_test_file:
                 respond(
                     "deny",
-                    f"現在 【{current_phase}】 フェーズです。テストコード ({target_file}) の改変は禁止されています。プロダクションコードを修正してテストを Green にしてください。"
+                    f"現在 【{current_phase}】 フェーズです。テストコード ({target_file}) の改変は禁止されています。プロダクションコードを修正してテストを Green にしてください。",
                 )
 
         respond("allow")
@@ -112,6 +119,7 @@ def main():
     except Exception as e:
         # 異常時は開発を止めないよう警告を出して allow
         respond("allow", f"TDD Guard internal warning: {str(e)}")
+
 
 if __name__ == "__main__":
     main()

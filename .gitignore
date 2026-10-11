@@ -21,6 +21,8 @@ tasks/
 specs/
 src/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # OS files
 .DS_Store

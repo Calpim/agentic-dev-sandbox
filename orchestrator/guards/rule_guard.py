@@ -1,9 +1,10 @@
+import json
 import re
 import sys
-import json
+from dataclasses import dataclass
 from enum import Enum
-from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any
+from typing import Any, Dict
+
 
 class ErrorCategory(str, Enum):
     SUCCESS = "SUCCESS"
@@ -13,11 +14,13 @@ class ErrorCategory(str, Enum):
     TEST_FAILURE = "TEST_FAILURE"
     UNKNOWN_FAILURE = "UNKNOWN_FAILURE"
 
+
 class NextAction(str, Enum):
-    PROCEED = "PROCEED"                      # 成功: 次のフェーズへ進行
-    DIRECT_FIX = "DIRECT_FIX"                # 機械的エラー: Implementer にエラー全文を返して即時修正 (0トークン)
-    SELF_RETRY = "SELF_RETRY"                # テスト失敗 (予算内): Implementer の自己リトライへ
+    PROCEED = "PROCEED"  # 成功: 次のフェーズへ進行
+    DIRECT_FIX = "DIRECT_FIX"  # 機械的エラー: Implementer にエラー全文を返して即時修正 (0トークン)
+    SELF_RETRY = "SELF_RETRY"  # テスト失敗 (予算内): Implementer の自己リトライへ
     ESCALATE_ANALYZER = "ESCALATE_ANALYZER"  # リトライ上限超過 or 原因不明: Analyzer (Opus) へエスカレーション
+
 
 @dataclass
 class RuleGuardResult:
@@ -38,12 +41,9 @@ class RuleGuardResult:
             "max_retries": self.max_retries,
         }
 
+
 def classify_execution_output(
-    exit_code: int,
-    stdout: str,
-    stderr: str = "",
-    retry_count: int = 0,
-    max_retries: int = 2
+    exit_code: int, stdout: str, stderr: str = "", retry_count: int = 0, max_retries: int = 2
 ) -> RuleGuardResult:
     """
     CI / テスト / Lint の実行出力を LLM を介さずに 0 トークンで決定論的に分類する。
@@ -108,7 +108,7 @@ def classify_execution_output(
 
     # 4. Lint / スタイルエラー (flake8, eslint, ruff)
     lint_patterns = [
-        r"(?:[A-Za-z0-9_-]+\.py):\d+:\d+:\s*(?:E\d{3}|W\d{3}|F\d{3})\s*(.+)",
+        r"(?:[^\s:]+\.py):\d+:\d+:\s*(?:[A-Z]\d{3,4}|[A-Z]+[0-9]+)\s*(.+)",
         r"ESLint:\s*\d+ problems?",
         r"rule violation:\s*(.+)",
         r"line \d+, col \d+, Error - (.+)",
@@ -167,6 +167,7 @@ def classify_execution_output(
         retry_count=retry_count,
         max_retries=max_retries,
     )
+
 
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):

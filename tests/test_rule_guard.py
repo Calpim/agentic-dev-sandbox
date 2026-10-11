@@ -1,14 +1,15 @@
-import pytest
 from orchestrator.guards.rule_guard import (
-    classify_execution_output,
     ErrorCategory,
     NextAction,
+    classify_execution_output,
 )
+
 
 def test_rule_guard_success():
     res = classify_execution_output(exit_code=0, stdout="================ 5 passed in 0.2s ================")
     assert res.category == ErrorCategory.SUCCESS
     assert res.next_action == NextAction.PROCEED
+
 
 def test_rule_guard_syntax_error():
     stdout = ""
@@ -21,12 +22,14 @@ SyntaxError: invalid syntax"""
     assert res.next_action == NextAction.DIRECT_FIX
     assert "SyntaxError" in res.summary
 
+
 def test_rule_guard_type_error():
-    stdout = "src/models.py:24: error: Argument 1 to \"save\" has incompatible type \"int\"; expected \"str\""
+    stdout = 'src/models.py:24: error: Argument 1 to "save" has incompatible type "int"; expected "str"'
     res = classify_execution_output(exit_code=1, stdout=stdout)
     assert res.category == ErrorCategory.TYPE_ERROR
     assert res.next_action == NextAction.DIRECT_FIX
     assert "型チェックエラー" in res.summary
+
 
 def test_rule_guard_lint_error():
     stdout = "src/routes.py:15:1: E302 expected 2 blank lines, found 1"
@@ -34,6 +37,15 @@ def test_rule_guard_lint_error():
     assert res.category == ErrorCategory.LINT_ERROR
     assert res.next_action == NextAction.DIRECT_FIX
     assert "Lint" in res.summary
+
+
+def test_rule_guard_ruff_isort_lint_error():
+    stdout = "src/app/pbi_101_service.py:12:1: I001 [*] Import block is un-sorted or un-formatted"
+    res = classify_execution_output(exit_code=1, stdout=stdout)
+    assert res.category == ErrorCategory.LINT_ERROR
+    assert res.next_action == NextAction.DIRECT_FIX
+    assert "I001" in res.summary
+
 
 def test_rule_guard_test_failure_within_budget():
     stdout = """============================= FAILURES =============================
@@ -47,6 +59,7 @@ E   AssertionError: assert 401 == 200
     assert res.next_action == NextAction.SELF_RETRY
     assert "自己リトライ枠残り" in res.summary
 
+
 def test_rule_guard_test_failure_exceeding_budget():
     stdout = """FAILED tests/test_user.py::test_user_auth - AssertionError: assert 401 == 200"""
     # retry_count = 2 (max_retries = 2) -> ESCALATE_ANALYZER
@@ -55,17 +68,20 @@ def test_rule_guard_test_failure_exceeding_budget():
     assert res.next_action == NextAction.ESCALATE_ANALYZER
     assert "Analyzerへエスカレーション" in res.summary
 
+
 def test_rule_guard_unknown_failure():
     stdout = "Segmentation fault (core dumped)"
     res = classify_execution_output(exit_code=139, stdout=stdout)
     assert res.category == ErrorCategory.UNKNOWN_FAILURE
     assert res.next_action == NextAction.ESCALATE_ANALYZER
 
+
 def test_rule_guard_cli_empty_input():
+    import json
     import subprocess
     import sys
-    import json
     from pathlib import Path
+
     repo_root = Path(__file__).resolve().parent.parent
     proc = subprocess.run(
         [sys.executable, "-m", "orchestrator.guards.rule_guard"],
@@ -82,11 +98,13 @@ def test_rule_guard_cli_empty_input():
     assert "summary" in data
     assert "details" in data
 
+
 def test_rule_guard_cli_valid_input():
+    import json
     import subprocess
     import sys
-    import json
     from pathlib import Path
+
     repo_root = Path(__file__).resolve().parent.parent
     payload = json.dumps({"exit_code": 0, "stdout": "All tests passed"})
     proc = subprocess.run(

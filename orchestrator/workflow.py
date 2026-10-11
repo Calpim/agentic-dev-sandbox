@@ -1,12 +1,13 @@
-from datetime import timedelta
 import asyncio
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any, Dict, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 # Activity 定義のインポート準備（名前ベースで呼ぶためインターフェースまたは文字列参照）
+
 
 @dataclass
 class WorkflowState:
@@ -19,12 +20,14 @@ class WorkflowState:
     pr_url: Optional[str] = None
     pr_summary_path: Optional[str] = None
 
+
 @workflow.defn
 class PBIDevelopmentWorkflow:
     """
     PBI 単位の自律開発メインワークフロー (v3.0)
     Temporal による状態永続化と Human-in-the-Loop 制御
     """
+
     def __init__(self):
         self.state = WorkflowState(pbi_id="")
 
@@ -65,7 +68,7 @@ class PBIDevelopmentWorkflow:
             "feedback": {
                 "example_map": self.state.example_map_feedback,
                 "schema": self.state.schema_feedback,
-            }
+            },
         }
 
     @workflow.run
@@ -77,7 +80,7 @@ class PBIDevelopmentWorkflow:
         # Phase 1-1: Example Map 生成
         # ---------------------------------------------------------
         retry_policy = RetryPolicy(maximum_attempts=3)
-        
+
         while not self.state.example_map_approved:
             feedback_to_apply = self.state.example_map_feedback
             self.state.example_map_feedback = None
@@ -148,12 +151,12 @@ class PBIDevelopmentWorkflow:
         # ---------------------------------------------------------
         self.state.stage = "PHASE_3_4_PARALLEL_EXECUTION"
         app_task = workflow.execute_child_workflow(
-            ComponentPipelineWorkflow,
+            ComponentPipelineWorkflow.run,
             args=[pbi_id, "app"],
             id=f"{pbi_id}-pipeline-app",
         )
         bff_task = workflow.execute_child_workflow(
-            ComponentPipelineWorkflow,
+            ComponentPipelineWorkflow.run,
             args=[pbi_id, "bff"],
             id=f"{pbi_id}-pipeline-bff",
         )
@@ -185,6 +188,7 @@ class ComponentPipelineWorkflow:
     """
     担当別 (App または BFF) の自律設計・TDDサイクル
     """
+
     @workflow.run
     async def run(self, pbi_id: str, component: str) -> Dict[str, Any]:
         retry_policy = RetryPolicy(maximum_attempts=2)
