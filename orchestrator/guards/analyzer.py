@@ -11,13 +11,14 @@ logger = logging.getLogger("orchestrator.guards.analyzer")
 
 
 class DirectiveType(str, Enum):
-    """ROADMAP P1-4 & WORKFLOW 5-3 に準拠した 5 つの振り分け先"""
+    """ROADMAP P1-4 & WORKFLOW 5-3 に準拠した振り分け先"""
 
     FIX_TEST = "FIX_TEST"  # テスト自体の誤り -> Phase 4-2 (Red) へ差し戻し
     RETRY_IMPL = "RETRY_IMPL"  # 実装方針の修正 -> Phase 4-2 (Green) へ
     RETRY_DESIGN = "RETRY_DESIGN"  # 設計不整合 -> Phase 4-1 (設計) へ差し戻し
     SCHEMA_CHANGE = "SCHEMA_CHANGE"  # API契約不備 -> 軽量 HIL (人間ゲート 2 差分承認) へ
     ESCALATE_HUMAN = "ESCALATE_HUMAN"  # 要件不整合 / サイクル上限超過 -> フル HIL へ
+    RESYNC = "RESYNC"  # スキーマ変更承認後の自律再同期 (P2-5 RESYNC Directive)
 
 
 @dataclass
