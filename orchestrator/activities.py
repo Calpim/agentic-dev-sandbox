@@ -14,6 +14,10 @@ import yaml
 from dotenv import load_dotenv
 from temporalio import activity
 
+from orchestrator.guards.analyzer import (
+    DirectiveType,
+    analyze_failure,
+)
 from orchestrator.guards.rule_guard import (
     NextAction,
     classify_execution_output,
@@ -526,7 +530,9 @@ def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str 
             logger.warning(f"Failed to update state.json: {e}")
 
 
-async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str, schema_content: str) -> Optional[str]:
+async def _call_gemini_for_design(
+    pbi_id: str, component: str, spec_content: str, schema_content: str, feedback: Optional[str] = None
+) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -535,6 +541,8 @@ async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str
 
         client = genai.Client(api_key=api_key)
         model_name = os.getenv("DESIGN_AGENT_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash"))
+
+        feedback_sec = f"\n\n# 直前の分析ディレクティブ / 修正指示:\n{feedback}" if feedback else ""
 
         prompt = f"""あなたは DDD およびアーキテクチャ設計の専門家「Design Agent」です。
 以下の Gherkin 仕様と OpenAPI 契約を基に、{component.upper()} 層の実装設計書 (Markdown形式) を策定してください。
@@ -546,7 +554,7 @@ async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str
 {spec_content}
 
 # OpenAPI スキーマ契約:
-{schema_content}
+{schema_content}{feedback_sec}
 
 # 必須要件
 1. 設計書は Markdown 形式のみ出力すること（コードブロック ```markdown は不要）。
@@ -564,14 +572,14 @@ async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str
         return None
 
 
-def _fallback_design_doc(pbi_id: str, component: str, spec_content: str) -> str:
+def _fallback_design_doc(pbi_id: str, component: str, spec_content: str, feedback: Optional[str] = None) -> str:
     clean_name = _to_pascal_case(pbi_id)
+    feedback_note = f"\n- **Analyzer Directive 反映**: {feedback}\n" if feedback else ""
     return f"""# Architecture & DDD Design: {pbi_id} ({component.upper()})
 
 ## 1. 責務と概要
 - 対象層: {component.upper()}
-- 目的: {pbi_id} のビジネス振る舞いおよび契約仕様を満たすモジュール設計。
-
+- 目的: {pbi_id} のビジネス振る舞いおよび契約仕様を満たすモジュール設計。{feedback_note}
 ## 2. クラス・サービス設計
 - Service: `{clean_name}Service`
   - メソッド: `execute(payload: dict) -> dict`
@@ -586,9 +594,9 @@ def _fallback_design_doc(pbi_id: str, component: str, spec_content: str) -> str:
 
 
 @activity.defn
-async def run_design_activity(pbi_id: str, component: str) -> Dict[str, Any]:
+async def run_design_activity(pbi_id: str, component: str, feedback: Optional[str] = None) -> Dict[str, Any]:
     """Phase 4-1: DDD / 設計フェーズ (Gemini API 結合)"""
-    logger.info(f"Running Design activity for {pbi_id} / {component}")
+    logger.info(f"Running Design activity for {pbi_id} / {component} (feedback={feedback})")
     _update_pipeline_phase(pbi_id, component, "DESIGN", "IN_PROGRESS")
 
     spec_path = BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature"
@@ -596,9 +604,9 @@ async def run_design_activity(pbi_id: str, component: str) -> Dict[str, Any]:
     spec_content = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
     schema_content = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
 
-    design_content = await _call_gemini_for_design(pbi_id, component, spec_content, schema_content)
+    design_content = await _call_gemini_for_design(pbi_id, component, spec_content, schema_content, feedback)
     if not design_content:
-        design_content = _fallback_design_doc(pbi_id, component, spec_content)
+        design_content = _fallback_design_doc(pbi_id, component, spec_content, feedback)
 
     design_file = BASE_DIR / "tasks" / pbi_id / component / "design.md"
     _ensure_dir(design_file.parent)
@@ -616,12 +624,13 @@ def _clean_id(pbi_id: str) -> str:
     return pbi_id.lower().replace("-", "_")
 
 
-def _generate_test_code(pbi_id: str, component: str) -> str:
+def _generate_test_code(pbi_id: str, component: str, directive_instruction: Optional[str] = None) -> str:
     clean_id = _clean_id(pbi_id)
     class_name = f"{_to_pascal_case(pbi_id)}Service"
+    comment = f"\n# Directive Applied: {directive_instruction}\n" if directive_instruction else ""
     return f"""import pytest
 from src.{component}.{clean_id}_service import {class_name}
-
+{comment}
 def test_{clean_id}_success():
     service = {class_name}()
     result = service.execute({{"identifier": "{clean_id}-test-01"}})
@@ -635,13 +644,14 @@ def test_{clean_id}_validation_error():
 """
 
 
-def _generate_impl_code(pbi_id: str, component: str) -> str:
+def _generate_impl_code(pbi_id: str, component: str, directive_instruction: Optional[str] = None) -> str:
     class_name = f"{_to_pascal_case(pbi_id)}Service"
+    comment = f"\n    # Directive Applied: {directive_instruction}" if directive_instruction else ""
     return f"""from typing import Dict, Any
 
 class {class_name}:
     \"\"\"Auto-generated service implementation for {pbi_id} ({component})\"\"\"
-
+{comment}
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         identifier = payload.get("identifier")
         if not identifier:
@@ -684,16 +694,22 @@ async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple
 
 
 @activity.defn
-async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dict[str, Any]) -> Dict[str, Any]:
-    """Phase 4-2 & 5: TDD サイクル (Red -> Green -> Refactor -> Verify with Rule Guard)"""
-    logger.info(f"Running TDD cycle for {pbi_id} / {component}")
+async def run_tdd_cycle_activity(
+    pbi_id: str,
+    component: str,
+    design_output: Dict[str, Any],
+    directive: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Phase 4-2 & 5: TDD サイクル (Red -> Green -> Refactor -> Verify with Rule Guard & Analyzer)"""
+    logger.info(
+        f"Running TDD cycle for {pbi_id} / {component} (directive={directive.get('directive') if directive else None})"
+    )
     clean_id = _clean_id(pbi_id)
 
     comp_src_dir = BASE_DIR / "src" / component
     comp_test_dir = comp_src_dir / "tests"
     _ensure_dir(comp_test_dir)
 
-    # Python パッケージ初期化 (__init__.py)
     for d in (BASE_DIR / "src", comp_src_dir, comp_test_dir):
         init_file = d / "__init__.py"
         if not init_file.exists():
@@ -702,31 +718,36 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     test_file = comp_test_dir / f"test_{clean_id}.py"
     impl_file = comp_src_dir / f"{clean_id}_service.py"
 
+    directive_type = directive.get("directive") if directive else None
+    directive_inst = directive.get("instruction", "") if directive else None
+
     # ---------------------------------------------------------
     # 1. RED (失敗するテストコード作成のみ可)
     # ---------------------------------------------------------
-    _update_pipeline_phase(pbi_id, component, "RED")
-    logger.info(f"[{component}] TDD Phase: RED - Creating failing tests at {test_file}")
+    # RETRY_IMPL 指定時はテストコードは既存のまま保持し、RED をスキップして GREEN へ進む
+    if directive_type != DirectiveType.RETRY_IMPL.value:
+        _update_pipeline_phase(pbi_id, component, "RED")
+        logger.info(f"[{component}] TDD Phase: RED - Creating failing tests at {test_file}")
 
-    if impl_file.exists():
-        impl_file.unlink()
+        if impl_file.exists():
+            impl_file.unlink()
 
-    test_code = _generate_test_code(pbi_id, component)
-    test_file.write_text(test_code, encoding="utf-8")
+        test_code = _generate_test_code(pbi_id, component, directive_instruction=directive_inst)
+        test_file.write_text(test_code, encoding="utf-8")
 
-    # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
-    red_code, red_out, red_err = await _run_pytest_on_target(test_file)
-    logger.info(
-        f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})"
-    )
-    if red_code == 0:
-        logger.error(f"[{component}] TDD RED phase violation: Tests passed unexpectedly without implementation.")
-        _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
-        return {
-            "tdd_status": "RED_PHASE_VIOLATION",
-            "component": component,
-            "error": "TDD RED phase violation: Tests passed unexpectedly without implementation. Tests must assert actual business logic.",
-        }
+        # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
+        red_code, red_out, red_err = await _run_pytest_on_target(test_file)
+        logger.info(
+            f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})"
+        )
+        if red_code == 0:
+            logger.error(f"[{component}] TDD RED phase violation: Tests passed unexpectedly without implementation.")
+            _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
+            return {
+                "tdd_status": "RED_PHASE_VIOLATION",
+                "component": component,
+                "error": "TDD RED phase violation: Tests passed unexpectedly without implementation. Tests must assert actual business logic.",
+            }
 
     # ---------------------------------------------------------
     # 2. GREEN (プロダクション実装のみ可、テスト改ざん不可)
@@ -734,7 +755,7 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     _update_pipeline_phase(pbi_id, component, "GREEN")
     logger.info(f"[{component}] TDD Phase: GREEN - Implementing solution at {impl_file}")
 
-    impl_code = _generate_impl_code(pbi_id, component)
+    impl_code = _generate_impl_code(pbi_id, component, directive_instruction=directive_inst)
     impl_file.write_text(impl_code, encoding="utf-8")
 
     # GREEN 検証: テストが通ることを確認 (非同期 & 早期ハンドリング)
@@ -752,6 +773,7 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
             "test_file": str(test_file),
             "impl_file": str(impl_file),
             "rule_guard": guard_result.to_dict(),
+            "verify_output": f"{green_out}\n{green_err}".strip(),
         }
 
     # ---------------------------------------------------------
@@ -770,14 +792,133 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"[{component}] Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
-    _update_pipeline_phase(pbi_id, component, "DONE", "COMPLETED")
+    if guard_result.next_action == NextAction.PROCEED:
+        _update_pipeline_phase(pbi_id, component, "DONE", "COMPLETED")
+        return {
+            "tdd_status": "ALL_GREEN",
+            "component": component,
+            "test_file": str(test_file),
+            "impl_file": str(impl_file),
+            "rule_guard": guard_result.to_dict(),
+        }
+    else:
+        _update_pipeline_phase(pbi_id, component, "VERIFY", "FAILED")
+        return {
+            "tdd_status": "VERIFY_FAILED",
+            "component": component,
+            "test_file": str(test_file),
+            "impl_file": str(impl_file),
+            "rule_guard": guard_result.to_dict(),
+            "verify_output": f"{verify_out}\n{verify_err}".strip(),
+        }
+
+
+@activity.defn
+async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 5-3: Analyzer 根本原因分析 & Directive 策定 (ROADMAP P1-4 & WORKFLOW 5-3)"""
+    logger.info(f"Running Analyzer activity for {pbi_id} / {component}")
+    _update_pipeline_phase(pbi_id, component, "ANALYZER", "IN_PROGRESS")
+
+    clean_id = _clean_id(pbi_id)
+    comp_src_dir = BASE_DIR / "src" / component
+    comp_test_dir = comp_src_dir / "tests"
+
+    test_file = comp_test_dir / f"test_{clean_id}.py"
+    impl_file = comp_src_dir / f"{clean_id}_service.py"
+    spec_file = BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature"
+    schema_file = BASE_DIR / "specs" / "api" / "v1" / f"{pbi_id}.yaml"
+    task_dir = BASE_DIR / "tasks" / pbi_id
+    state_file = task_dir / "state.json"
+    plan_file = task_dir / component / "plan.md"
+    audit_file = task_dir / "audit.jsonl"
+
+    test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
+    impl_code = impl_file.read_text(encoding="utf-8") if impl_file.exists() else ""
+    spec_content = spec_file.read_text(encoding="utf-8") if spec_file.exists() else ""
+    schema_content = schema_file.read_text(encoding="utf-8") if schema_file.exists() else ""
+
+    test_output = (
+        failure_context.get("verify_output")
+        or failure_context.get("error")
+        or json.dumps(failure_context.get("rule_guard", {}), ensure_ascii=False)
+    )
+
+    # サイクルカウントの読み取り & インクリメント
+    current_cycle = 1
+    if state_file.exists():
+        try:
+            st_data = json.loads(state_file.read_text(encoding="utf-8"))
+            current_cycle = st_data.get("pipelines", {}).get(component, {}).get("analyzer_cycles", 0) + 1
+        except Exception:
+            pass
+
+    max_cycles = int(os.environ.get("MAX_ANALYZER_CYCLES", "2"))
+
+    # Analyzer 推論実行 (読み取り専用)
+    directive = await analyze_failure(
+        pbi_id=pbi_id,
+        component=component,
+        test_output=test_output,
+        test_code=test_code,
+        impl_code=impl_code,
+        spec_content=spec_content,
+        schema_content=schema_content,
+        cycle_count=current_cycle,
+        max_cycles=max_cycles,
+        test_file_path=str(test_file),
+        impl_file_path=str(impl_file),
+    )
+
+    # 1. state.json の更新
+    if state_file.exists():
+        try:
+            st_data = json.loads(state_file.read_text(encoding="utf-8"))
+            if component in st_data.get("pipelines", {}):
+                st_data["pipelines"][component]["analyzer_cycles"] = current_cycle
+                st_data["pipelines"][component]["last_directive"] = directive.to_dict()
+                if directive.directive == DirectiveType.ESCALATE_HUMAN:
+                    st_data["pipelines"][component]["status"] = "ESCALATED_HUMAN"
+            state_file.write_text(json.dumps(st_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to update state.json in analyzer: {e}")
+
+    # 2. plan.md の更新
+    if plan_file.exists():
+        try:
+            existing_plan = plan_file.read_text(encoding="utf-8")
+            target_str = ", ".join(directive.target_files) if directive.target_files else "None"
+            directive_section = f"""
+## 🚨 Analyzer Directive: {directive.directive.value} (Cycle {current_cycle}/{max_cycles})
+- **判定理由**: {directive.reason}
+- **指示内容**: {directive.instruction}
+- **対象ファイル**: {target_str}
+"""
+            plan_file.write_text(existing_plan + directive_section, encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to append directive to plan.md: {e}")
+
+    # 3. audit.jsonl への記録
+    try:
+        from datetime import datetime, timezone
+
+        audit_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "ANALYZER_DIRECTIVE",
+            "pbi_id": pbi_id,
+            "component": component,
+            "cycle": current_cycle,
+            "directive": directive.to_dict(),
+        }
+        with audit_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(audit_entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"Failed to write to audit.jsonl: {e}")
 
     return {
-        "tdd_status": "ALL_GREEN" if guard_result.next_action == NextAction.PROCEED else "FAILED",
+        "pbi_id": pbi_id,
         "component": component,
-        "test_file": str(test_file),
-        "impl_file": str(impl_file),
-        "rule_guard": guard_result.to_dict(),
+        "directive": directive.to_dict(),
+        "status": "COMPLETED",
     }
 
 
@@ -925,6 +1066,39 @@ def _build_pr_body(
     chk_integ = "x" if integ_ok else " "
     integ_label = "合格" if integ_ok else "不合格"
 
+    # Analyzer 介入実績の抽出
+    audit_file = BASE_DIR / "tasks" / pbi_id / "audit.jsonl"
+    analyzer_entries = []
+    if audit_file.exists():
+        try:
+            for line in audit_file.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if entry.get("event") == "ANALYZER_DIRECTIVE":
+                    analyzer_entries.append(entry)
+        except Exception:
+            pass
+
+    analyzer_section = ""
+    reviewer_extra = ""
+    if analyzer_entries:
+        rows = []
+        for ae in analyzer_entries:
+            comp = ae.get("component", "unknown")
+            cycle = ae.get("cycle", 1)
+            dir_data = ae.get("directive", {})
+            dtype = dir_data.get("directive", "UNKNOWN")
+            reason = dir_data.get("reason", "")
+            rows.append(f"- **[{comp.upper()}] Cycle {cycle} ({dtype})**: {reason}")
+        analyzer_section = f"""
+---
+
+## 🤖 Analyzer 介入実績 (Phase 5-3 自律自己修復)
+{chr(10).join(rows)}
+"""
+        reviewer_extra = "\n3. **Analyzer による自己修復 (FIX_TEST / RETRY_IMPL)** が発生したコンポーネントについて、指示内容およびテスト/実装の修正妥当性を重点的にご確認ください。"
+
     return f"""## 📌 概要
 自律開発パイプライン (v3.0) により、PBI `{pbi_id}` に対する要件分析から結合テストまでを全自動完了した Pull Request です。
 
@@ -946,12 +1120,12 @@ def _build_pr_body(
 - [{chk_app}] **Phase 4-1 & 4-2: App TDD サイクル** (Rule Guard: `{guard_app}`)
 - [{chk_bff}] **Phase 4-1 & 4-2: BFF TDD サイクル** (Rule Guard: `{guard_bff}`)
 - [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: App-BFF エンドツーエンド契約適合性検証 {integ_label} (`{guard_integ}`)
-
+{analyzer_section}
 ---
 
-## 👀 レビュアーへの確認ポイント
+## 👀 レビュアーへの確認ポイント (重点レビュー箇所)
 1. トレーサビリティ表の `BIZ-ID` が、Example Map の受け入れ基準をすべて網羅していることをご確認ください。
-2. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。
+2. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。{reviewer_extra}
 """
 
 

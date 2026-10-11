@@ -164,6 +164,16 @@ class PBIDevelopmentWorkflow:
         # 両パイプラインの完了を待機
         app_res, bff_res = await asyncio.gather(app_task, bff_task)
 
+        # パイプライン成否チェック (いずれかが失敗またはエスカレーション時は中断)
+        if app_res.get("status") != "SUCCESS" or bff_res.get("status") != "SUCCESS":
+            self.state.stage = "PIPELINE_FAILED"
+            return {
+                "pbi_id": pbi_id,
+                "status": "FAILED",
+                "app": app_res,
+                "bff": bff_res,
+            }
+
         # ---------------------------------------------------------
         # Phase 6: 結合検証 & PR 作成
         # ---------------------------------------------------------
@@ -186,7 +196,7 @@ class PBIDevelopmentWorkflow:
 @workflow.defn
 class ComponentPipelineWorkflow:
     """
-    担当別 (App または BFF) の自律設計・TDDサイクル
+    担当別 (App または BFF) の自律設計・TDDサイクル (v3.0 + Analyzer自律自己修復)
     """
 
     @workflow.run
@@ -201,16 +211,71 @@ class ComponentPipelineWorkflow:
             retry_policy=retry_policy,
         )
 
-        # Phase 4-2 & 5: TDD 実装ループ (Red -> Green -> Refactor -> Verify)
-        tdd_output = await workflow.execute_activity(
-            "run_tdd_cycle_activity",
-            args=[pbi_id, component, design_output],
-            start_to_close_timeout=timedelta(minutes=20),
-        )
+        current_directive: Optional[Dict[str, Any]] = None
+        tdd_output: Dict[str, Any] = {}
+        max_analyzer_cycles = 2
+
+        # Phase 4-2 & 5: TDD 実装・検証 & Analyzer 自律自己修復ループ
+        for _ in range(max_analyzer_cycles + 1):
+            tdd_output = await workflow.execute_activity(
+                "run_tdd_cycle_activity",
+                args=[pbi_id, component, design_output, current_directive],
+                start_to_close_timeout=timedelta(minutes=20),
+            )
+
+            if tdd_output.get("tdd_status") == "ALL_GREEN":
+                return {
+                    "pbi_id": pbi_id,
+                    "component": component,
+                    "status": "SUCCESS",
+                    "details": tdd_output,
+                }
+
+            # TDD 失敗時: Phase 5-3 Analyzer による根本原因分析 & Directive 策定
+            analyzer_res = await workflow.execute_activity(
+                "run_analyzer_activity",
+                args=[pbi_id, component, tdd_output],
+                start_to_close_timeout=timedelta(minutes=5),
+            )
+
+            current_directive = analyzer_res.get("directive", {})
+            directive_type = current_directive.get("directive")
+
+            if directive_type == "ESCALATE_HUMAN":
+                return {
+                    "pbi_id": pbi_id,
+                    "component": component,
+                    "status": "ESCALATED_HUMAN",
+                    "details": tdd_output,
+                    "directive": current_directive,
+                }
+            elif directive_type == "SCHEMA_CHANGE":
+                return {
+                    "pbi_id": pbi_id,
+                    "component": component,
+                    "status": "SCHEMA_CHANGE_REQUESTED",
+                    "details": tdd_output,
+                    "directive": current_directive,
+                }
+            elif directive_type == "RETRY_DESIGN":
+                # Phase 4-1 再設計へ差し戻し
+                design_output = await workflow.execute_activity(
+                    "run_design_activity",
+                    args=[pbi_id, component, current_directive.get("instruction")],
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry_policy,
+                )
+                current_directive = None
+            elif directive_type in ("FIX_TEST", "RETRY_IMPL"):
+                # 指示内容を持って次の TDD サイクルへ
+                continue
+            else:
+                break
 
         return {
             "pbi_id": pbi_id,
             "component": component,
-            "status": "SUCCESS",
+            "status": "FAILED",
             "details": tdd_output,
+            "directive": current_directive,
         }

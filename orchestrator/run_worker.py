@@ -17,6 +17,7 @@ from orchestrator.activities import (
     generate_example_map_activity,
     initialize_tasks_activity,
     integration_and_pr_activity,
+    run_analyzer_activity,
     run_design_activity,
     run_tdd_cycle_activity,
 )
@@ -51,6 +52,7 @@ async def main():
             initialize_tasks_activity,
             run_design_activity,
             run_tdd_cycle_activity,
+            run_analyzer_activity,
             integration_and_pr_activity,
         ],
     )
