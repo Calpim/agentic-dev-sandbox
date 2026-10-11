@@ -831,6 +831,8 @@ async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Di
     state_file = task_dir / "state.json"
     plan_file = task_dir / component / "plan.md"
     audit_file = task_dir / "audit.jsonl"
+    _ensure_dir(task_dir)
+    _ensure_dir(plan_file.parent)
 
     test_code = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
     impl_code = impl_file.read_text(encoding="utf-8") if impl_file.exists() else ""

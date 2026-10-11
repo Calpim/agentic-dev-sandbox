@@ -34,15 +34,23 @@ def cleanup_test_artifacts():
 
 
 def test_heuristic_classification_circuit_breaker():
-    """サーキットブレーカー: サイクル回数が上限に達した場合に ESCALATE_HUMAN となること"""
+    """サーキットブレーカー: サイクル回数が上限を超過した場合に ESCALATE_HUMAN となること"""
     directive = classify_failure_heuristics(
         test_output="AssertionError: assert False",
-        cycle_count=2,
+        cycle_count=3,
         max_cycles=2,
     )
     assert directive.directive == DirectiveType.ESCALATE_HUMAN
-    assert directive.cycle_count == 2
-    assert "上限 (2回) に達しました" in directive.reason
+    assert directive.cycle_count == 3
+    assert "上限 (2回) を超過しました" in directive.reason
+
+    # 上限内 (cycle_count == 2 <= max_cycles) の場合は自己修復分析が継続されること
+    d_within = classify_failure_heuristics(
+        test_output="KeyError: 'foo'",
+        cycle_count=2,
+        max_cycles=2,
+    )
+    assert d_within.directive == DirectiveType.RETRY_IMPL
 
 
 def test_heuristic_classification_directives():
@@ -66,6 +74,15 @@ def test_heuristic_classification_directives():
     )
     assert d_test.directive == DirectiveType.FIX_TEST
     assert d_test.target_files == ["src/app/tests/test_foo.py"]
+
+    # フィクスチャ欠落エラーも FIX_TEST として検知されること
+    d_fixture = classify_failure_heuristics(
+        test_output="fixture 'auth_client' not found",
+        cycle_count=1,
+        max_cycles=2,
+        test_file_path="src/app/tests/test_foo.py",
+    )
+    assert d_fixture.directive == DirectiveType.FIX_TEST
 
     # 3. アーキテクチャ不整合 -> RETRY_DESIGN
     d_design = classify_failure_heuristics(

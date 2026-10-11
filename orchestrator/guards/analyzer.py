@@ -74,10 +74,10 @@ def classify_failure_heuristics(
     LLM が使用不可またはオフライン時の決定論的フォールバック・ルールベース分析。
     """
     # 1. サーキットブレーカー (サイクル上限超過)
-    if cycle_count >= max_cycles:
+    if cycle_count > max_cycles:
         return AnalyzerDirective(
             directive=DirectiveType.ESCALATE_HUMAN,
-            reason=f"Analyzer サイクル回数が上限 ({max_cycles}回) に達しました。自律ループを停止し、人間（PO）へエスカレーションします。",
+            reason=f"Analyzer サイクル回数が上限 ({max_cycles}回) を超過しました。自律ループを停止し、人間（PO）へエスカレーションします。",
             instruction="要件定義（Example Map）または設計書を確認し、手動で方針を決定してください。",
             target_files=[],
             confidence=1.0,
@@ -88,18 +88,33 @@ def classify_failure_heuristics(
 
     # 2. スキーマ契約不備の検知
     if any(k in out_lower for k in ["schema validation", "openapi", "contract mismatch", "missing schema field"]):
+        target_files = [f"specs/api/v1/{Path(test_file_path).stem.replace('test_', '')}.yaml"] if test_file_path else []
         return AnalyzerDirective(
             directive=DirectiveType.SCHEMA_CHANGE,
             reason="テスト実行時に API スキーマ（OpenAPI）の不整合またはフィールド欠落が検出されました。",
             instruction="OpenAPI スキーマに必要なプロパティを追加または変更し、軽量 HIL で承認を得てください。",
-            target_files=[f"specs/api/v1/{Path(test_file_path).stem.replace('test_', '')}.yaml"],
+            target_files=target_files,
             confidence=0.85,
             cycle_count=cycle_count,
         )
 
     # 3. テストコード自体の誤り (FIX_TEST) の検知
-    # 例: アサーション期待値と仕様書の矛盾、テスト側の型エラーや不正なモック
-    if any(k in out_lower for k in ["test defect", "wrong expectation", "faulty test", "test_assert_bug"]):
+    # 例: アサーション期待値と仕様書の矛盾、テスト側の型エラーや不正なモック、フィクスチャ欠落
+    is_fix_test = (
+        any(
+            k in out_lower
+            for k in [
+                "test defect",
+                "wrong expectation",
+                "faulty test",
+                "test_assert_bug",
+                "pytest: error:",
+            ]
+        )
+        or "fixturelookuperror" in out_lower
+        or ("fixture" in out_lower and "not found" in out_lower)
+    )
+    if is_fix_test:
         return AnalyzerDirective(
             directive=DirectiveType.FIX_TEST,
             reason="テストコード自体のアサーションまたは期待値が仕様定義と矛盾していることが検知されました。",
@@ -150,10 +165,10 @@ async def analyze_failure(
     logger.info(f"Analyzer triggered for {pbi_id} ({component}), cycle={cycle_count}/{max_cycles}")
 
     # 1. サーキットブレーカー (上限チェック)
-    if cycle_count >= max_cycles:
+    if cycle_count > max_cycles:
         return AnalyzerDirective(
             directive=DirectiveType.ESCALATE_HUMAN,
-            reason=f"Analyzer サイクル回数が上限 ({max_cycles}回) に達しました。無限ループを防ぐため人間へエスカレーションします。",
+            reason=f"Analyzer サイクル回数が上限 ({max_cycles}回) を超過しました。無限ループを防ぐため人間へエスカレーションします。",
             instruction="人間の判断が必要です。PBI 要件またはテスト設計を手動でレビューしてください。",
             target_files=[],
             confidence=1.0,
