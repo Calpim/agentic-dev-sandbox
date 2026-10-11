@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from typing import Optional
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -116,6 +117,16 @@ def status(workflow_id: str = typer.Argument(..., help="Workflow ID")):
                     title="Action Required: Gate 2",
                 )
             )
+        elif stage == "WAITING_LIGHTWEIGHT_HIL_SCHEMA_CHANGE":
+            console.print(
+                Panel(
+                    f"[bold yellow]軽量 HIL (P2-5): スキーマ変更要求が発生しました[/bold yellow]\n"
+                    f"対象ファイル: `specs/api/v1/{pbi_id}.yaml`\n\n"
+                    f"差分承認してRESYNCする場合: `python orchestrator/cli.py approve-schema-change {workflow_id}`\n"
+                    f'却下/修正指示する場合: `python orchestrator/cli.py reject-schema-change {workflow_id} --feedback "指示内容"`',
+                    title="Action Required: Lightweight HIL (SCHEMA_CHANGE)",
+                )
+            )
         elif stage == "COMPLETED":
             pr_url = status_data.get("pr_url")
             summary_path = status_data.get("pr_summary_path", f"tasks/{pbi_id}/PR_SUMMARY.md")
@@ -213,6 +224,65 @@ def reject_schema(
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("reject_schema", args=[feedback])
         console.print(f"[bold yellow][RETRY] スキーマ修正指示を送信しました: {workflow_id}[/bold yellow]")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def approve_schema_change(
+    workflow_id: str = typer.Argument(..., help="Workflow ID"),
+    feedback: Optional[str] = typer.Option(None, "--feedback", "-f", help="追加の修正指示・反映要望"),
+):
+    """軽量 HIL (P2-5): スキーマ変更差分を承認してパイプラインを再同期 (RESYNC) する"""
+
+    async def _run():
+        client = await get_client()
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal("approve_schema_change", args=[feedback])
+        console.print(f"[bold green][OK] スキーマ変更を承認しました: {workflow_id}[/bold green]")
+        console.print("OpenAPI スキーマが更新され、App / BFF パイプラインが自動再同期 (RESYNC) されます！")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def reject_schema_change(
+    workflow_id: str = typer.Argument(..., help="Workflow ID"),
+    feedback: str = typer.Option(..., "--feedback", "-f", help="却下理由・差し戻し指示"),
+):
+    """軽量 HIL (P2-5): スキーマ変更要求を却下して差し戻す"""
+
+    async def _run():
+        client = await get_client()
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal("reject_schema_change", args=[feedback])
+        console.print(f"[bold red][REJECT] スキーマ変更要求を却下しました: {workflow_id}[/bold red]")
+
+    asyncio.run(_run())
+
+
+@app.command()
+def run_interactive(
+    pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
+    description: str = typer.Option("ユーザー登録およびバリデーション機能", help="PBIの概要・受け入れ条件"),
+):
+    """Temporal サーバーなしで、ターミナル対話形式 (Gate 1, Gate 2, 軽量 HIL) で開発パイプラインを実行する"""
+    from orchestrator.interactive import InteractiveWorkflowRunner
+
+    async def _run():
+        runner = InteractiveWorkflowRunner(pbi_id=pbi_id, pbi_content=description)
+        result = await runner.run()
+        if result.get("status") == "COMPLETED":
+            console.print(
+                Panel(
+                    f"[bold green]ワークフローが完了しました！[/bold green]\n"
+                    f"PR URL: [cyan]{result.get('pr_url')}[/cyan]\n"
+                    f"PR Summary: [cyan]{result.get('pr_summary_path')}[/cyan]",
+                    title="Workflow Completed",
+                )
+            )
+        else:
+            console.print(f"[bold red]ワークフローが終了しました (Status: {result.get('status')})[/bold red]")
 
     asyncio.run(_run())
 
