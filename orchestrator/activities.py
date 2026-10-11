@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -35,7 +36,7 @@ async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: 
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        model_name = os.getenv("SPEC_AGENT_MODEL", "gemini-2.5-flash")
+        model_name = os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash")
         
         prompt = f"""あなたは BDD / Example Mapping の専門家「Spec Agent」です。
 以下のPBI要件を分析し、受け入れ条件を明確化するための「Example Map」を日本語のMarkdown形式で作成してください。
@@ -122,9 +123,58 @@ async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback:
     target_file.write_text(content, encoding="utf-8")
     return str(target_file)
 
+async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) -> Optional[Dict[str, str]]:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        return None
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        model_name = os.getenv("SPEC_DECOMPOSE_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash"))
+        
+        prompt = f"""あなたは BDD 仕様分解の専門家「Spec Decomposition Agent」です。
+以下の承認済み「Example Map」を入力とし、3つの層（ビジネス層、App層、BFF層）の Gherkin シナリオを作成してください。
+
+# PBI 識別子: {pbi_id}
+# 承認済み Example Map:
+{example_map_content}
+
+# 必須要件と規約
+1. すべての Gherkin ファイルの先頭に `# language: ja` を宣言すること。
+2. ビジネス層:
+   - 宣言的な日本語で記述し、操作手順（ボタンをクリック等）ではなく振る舞いを書く。
+   - ルールごとに `@BIZ-xxx` をタグ付けする。
+3. App層:
+   - クライアント UI / 状態変化 / ユーザーフィードバックのシナリオを展開。
+   - 必ず `@covers:BIZ-xxx` を付与してビジネス層とのトレーサビリティを成立させること。
+4. BFF層:
+   - API エンドポイントの入出力、バリデーション、マッピングのシナリオを展開。
+   - 必ず `@covers:BIZ-xxx` を付与すること。
+
+# 出力形式 (JSON 厳守)
+以下のキーを持つ単一の JSON オブジェクトのみを返してください。Markdownのコードブロック（```json）は不要です。
+{{
+  "business": "<ビジネス層のGherkin文字列>",
+  "app": "<App層のGherkin文字列>",
+  "bff": "<BFF層のGherkin文字列>"
+}}
+"""
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=prompt,
+        )
+        text = _strip_markdown_codeblock(response.text)
+        data = json.loads(text)
+        if all(k in data for k in ("business", "app", "bff")):
+            return data
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to decompose specs via Gemini API: {e}")
+        return None
+
 @activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
-    """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解"""
+    """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
     logger.info(f"Decomposing specs for {pbi_id} from {example_map_path}")
     
     biz_dir = BASE_DIR / "specs" / "features" / "business"
@@ -133,45 +183,79 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     for d in (biz_dir, app_dir, bff_dir):
         _ensure_dir(d)
 
+    example_map_content = Path(example_map_path).read_text(encoding="utf-8")
+
+    # 1. 本物の LLM (Gemini API) による仕様分解を試行
+    llm_specs = await _call_gemini_for_decomposition(pbi_id, example_map_content)
+    if llm_specs:
+        logger.info("Successfully decomposed Gherkin specs via Gemini API!")
+        biz_file = biz_dir / f"{pbi_id}.feature"
+        app_file = app_dir / f"{pbi_id}.feature"
+        bff_file = bff_dir / f"{pbi_id}.feature"
+        
+        biz_file.write_text(llm_specs["business"], encoding="utf-8")
+        app_file.write_text(llm_specs["app"], encoding="utf-8")
+        bff_file.write_text(llm_specs["bff"], encoding="utf-8")
+        
+        return {
+            "business": str(biz_file),
+            "app": str(app_file),
+            "bff": str(bff_file),
+        }
+
+    # 2. フォールバック生成: Example Map から BIZ-ID を動的に抽出して展開
+    logger.info("Decomposing specs via dynamic fallback parser...")
+    biz_matches = re.findall(r"##\s+(BIZ-\d+)(?::\s*|\s+)(.+)", example_map_content)
+    
+    biz_rules_gherkin = []
+    covers_tags = []
+    
+    if biz_matches:
+        for biz_id, rule_desc in biz_matches:
+            covers_tags.append(f"@covers:{biz_id}")
+            biz_rules_gherkin.append(f"""  @{biz_id}
+  ルール: {rule_desc.strip()}
+    シナリオ: {rule_desc.strip()}の検証
+      前提 適切な前提条件が満たされている
+      もし 対象の操作を実行したとき
+      ならば 期待される結果が得られる
+""")
+    else:
+        covers_tags = ["@covers:BIZ-001", "@covers:BIZ-002"]
+        biz_rules_gherkin.append("""  @BIZ-001
+  ルール: 正常系振る舞い
+    シナリオ: 正常入力の処理
+      前提 前提条件が成立している
+      もし 有効なデータが送信されたとき
+      ならば 正常に完了する
+""")
+
+    covers_header = " ".join(covers_tags)
+
     # 1. ビジネス層 Gherkin
     biz_file = biz_dir / f"{pbi_id}.feature"
-    biz_file.write_text(f"""# language: ja
-機能: {pbi_id} ビジネス振る舞い定義
-
-  @BIZ-001
-  ルール: 正常な入力が処理されること
-    シナリオ: 有効なデータ送信
-      前提 利用者が認証されている
-      もし 有効な入力データが送信されたとき
-      ならば 正常に反映され確認通知が行われる
-
-  @BIZ-002
-  ルール: 重複データは拒否されること
-    シナリオ: 重複データの送信
-      前提 既存データが存在している
-      もし 同一の識別子で登録を試みたとき
-      ならば 重複エラーが通知される
-""", encoding="utf-8")
+    biz_content = f"# language: ja\n機能: {pbi_id} ビジネス振る舞い定義\n\n" + "\n".join(biz_rules_gherkin)
+    biz_file.write_text(biz_content, encoding="utf-8")
 
     # 2. App層 Gherkin
     app_file = app_dir / f"{pbi_id}.feature"
     app_file.write_text(f"""# language: ja
-@covers:BIZ-001 @covers:BIZ-002
+{covers_header}
 機能: {pbi_id} クライアントUI振る舞い
-  シナリオ: 成功フィードバックの表示
-    前提 入力画面が開かれている
-    もし 正しい情報を入力して保存ボタンを押す
-    ならば 完了メッセージが表示される
+  シナリオ: ユーザーインターフェース操作と状態変化
+    前提 画面が表示されている
+    もし 操作を実行する
+    ならば 画面に結果が適切に反映される
 """, encoding="utf-8")
 
     # 3. BFF層 Gherkin
     bff_file = bff_dir / f"{pbi_id}.feature"
     bff_file.write_text(f"""# language: ja
-@covers:BIZ-001 @covers:BIZ-002
+{covers_header}
 機能: {pbi_id} APIエンドポイント連携
-  シナリオ: エンドポイントレスポンス検証
-    もし POSTリクエストが送信される
-    ならば ステータス200と処理結果JSONが返却される
+  シナリオ: リクエスト処理とスキーマ適合レスポンス
+    もし APIリクエストが送信される
+    ならば ステータスコードとJSONが返却される
 """, encoding="utf-8")
 
     return {

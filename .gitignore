@@ -16,9 +16,10 @@ temporal-data/
 *.sqlite-shm
 *.sqlite-wal
 
-# Task execution logs and state (temporary run artifacts)
-tasks/**/audit.log
-tasks/**/audit.jsonl
+# Task execution artifacts & generated specs
+tasks/
+specs/
+.pytest_cache/
 
 # OS files
 .DS_Store
