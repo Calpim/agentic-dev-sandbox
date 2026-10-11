@@ -1,6 +1,12 @@
 import asyncio
 import os
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from typing import Optional
 import typer
 from rich.console import Console
@@ -83,7 +89,7 @@ def approve_example_map(workflow_id: str = typer.Argument(..., help="Workflow ID
         client = await get_client()
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("approve_example_map")
-        console.print(f"[bold green]✔ Example Map を承認しました: {workflow_id}[/bold green]")
+        console.print(f"[bold green][OK] Example Map を承認しました: {workflow_id}[/bold green]")
         console.print("Gherkin 生成と OpenAPI スキーマ ドラフトへ進みます。")
     asyncio.run(_run())
 
@@ -97,7 +103,7 @@ def reject_example_map(
         client = await get_client()
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("reject_example_map", args=[feedback])
-        console.print(f"[bold yellow]↺ 修正指示を送信しました: {workflow_id}[/bold yellow]")
+        console.print(f"[bold yellow][RETRY] 修正指示を送信しました: {workflow_id}[/bold yellow]")
     asyncio.run(_run())
 
 @app.command()
@@ -107,7 +113,7 @@ def approve_schema(workflow_id: str = typer.Argument(..., help="Workflow ID")):
         client = await get_client()
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("approve_schema")
-        console.print(f"[bold green]✔ スキーマを承認しました: {workflow_id}[/bold green]")
+        console.print(f"[bold green][OK] スキーマを承認しました: {workflow_id}[/bold green]")
         console.print("App / BFF の並行自律開発パイプラインが開始されます！")
     asyncio.run(_run())
 
@@ -121,7 +127,7 @@ def reject_schema(
         client = await get_client()
         handle = client.get_workflow_handle(workflow_id)
         await handle.signal("reject_schema", args=[feedback])
-        console.print(f"[bold yellow]↺ スキーマ修正指示を送信しました: {workflow_id}[/bold yellow]")
+        console.print(f"[bold yellow][RETRY] スキーマ修正指示を送信しました: {workflow_id}[/bold yellow]")
     asyncio.run(_run())
 
 if __name__ == "__main__":
