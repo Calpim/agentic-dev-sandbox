@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Temporal / Local runtime data
+temporal-data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Task execution logs and state (temporary run artifacts)
+tasks/**/audit.log
+tasks/**/audit.jsonl
+
+# OS files
+.DS_Store
+Thumbs.db
