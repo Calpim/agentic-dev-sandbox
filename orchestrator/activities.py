@@ -16,13 +16,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def _ensure_dir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
-def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> Optional[str]:
+def _strip_markdown_codeblock(text: str) -> str:
+    """LLM が出力した Markdown コードブロック (```markdown ... ```) を除去する"""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    return cleaned
+
+async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> Optional[str]:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
+        model_name = os.getenv("SPEC_AGENT_MODEL", "gemini-2.5-flash")
         
         prompt = f"""あなたは BDD / Example Mapping の専門家「Spec Agent」です。
 以下のPBI要件を分析し、受け入れ条件を明確化するための「Example Map」を日本語のMarkdown形式で作成してください。
@@ -47,8 +60,8 @@ def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Option
 4. 人間への確認事項 (## ❓ AIからの確認事項 (Human-in-the-Loop))
    - 曖昧な仕様やエッジケース、境界値、エラーハンドリングに関して、人間に確認すべき鋭い質問を 2〜4 件箇条書き (- [ ] Q1. ...) で挙げること。
 """
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
+        response = await client.aio.models.generate_content(
+            model=model_name,
             contents=prompt,
         )
         return response.text
@@ -65,12 +78,13 @@ async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback:
     _ensure_dir(target_dir)
     target_file = target_dir / f"{pbi_id}.md"
 
-    # 1. 本物の LLM (Gemini API) 呼び出しを試行
-    llm_output = _call_gemini_for_example_map(pbi_id, pbi_content, feedback)
+    # 1. 本物の LLM (Gemini API) 呼び出しを試行 (非同期)
+    llm_output = await _call_gemini_for_example_map(pbi_id, pbi_content, feedback)
     
     if llm_output:
         logger.info("Successfully generated Example Map via Gemini API!")
-        target_file.write_text(llm_output, encoding="utf-8")
+        sanitized_output = _strip_markdown_codeblock(llm_output)
+        target_file.write_text(sanitized_output, encoding="utf-8")
         return str(target_file)
 
     # 2. フォールバック生成（APIキー未設定またはエラー時：フィードバックを動的解析）
