@@ -173,7 +173,10 @@ class PBIDevelopmentWorkflow:
 
         self.state.pr_url = pr_result.get("pr_url")
         self.state.pr_summary_path = pr_result.get("pr_summary_path")
-        self.state.stage = "COMPLETED"
+        if pr_result.get("status") == "COMPLETED":
+            self.state.stage = "COMPLETED"
+        else:
+            self.state.stage = "INTEGRATION_FAILED"
         return pr_result
 
 

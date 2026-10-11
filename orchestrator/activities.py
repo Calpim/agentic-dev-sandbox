@@ -775,6 +775,7 @@ def _get_github_token() -> Optional[str]:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         return token
+    proc = None
     try:
         proc = subprocess.Popen(
             ["git", "credential", "fill"],
@@ -782,21 +783,42 @@ def _get_github_token() -> Optional[str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         stdout, _ = proc.communicate("protocol=https\nhost=github.com\n\n", timeout=5.0)
         creds = dict(line.split("=", 1) for line in stdout.strip().split("\n") if "=" in line)
         return creds.get("password")
+    except subprocess.TimeoutExpired:
+        if proc:
+            proc.kill()
+            try:
+                proc.communicate()
+            except Exception:
+                pass
+        return None
     except Exception:
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         return None
 
 def _get_repo_slug() -> str:
-    """現在の git リポジトリのスラッグ (owner/repo) を取得する"""
+    """現在の git リポジトリのスラッグ (owner/repo) を取得する (環境変数 GITHUB_REPOSITORY 優先)"""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if repo:
+        return repo
     try:
         proc = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
+            timeout=5.0,
         )
         url = proc.stdout.strip()
         match = re.search(r"github\.com[/:]([^/]+/[^/.]+)(?:\.git)?", url)
@@ -813,7 +835,10 @@ def _get_current_branch() -> str:
             ["git", "branch", "--show-current"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
+            timeout=5.0,
         )
         return proc.stdout.strip() or "main"
     except Exception:
@@ -837,16 +862,29 @@ def _build_pr_body(
     if not biz_rules:
         biz_rules = [("BIZ-001", "基本機能振る舞い")]
 
+    # 各パイプラインおよび結合検証の成否判定 (Issue 3: 動的判定)
+    app_ok = (app_res.get("status") == "SUCCESS" or app_res.get("tdd_status") == "ALL_GREEN")
+    bff_ok = (bff_res.get("status") == "SUCCESS" or bff_res.get("tdd_status") == "ALL_GREEN")
+    integ_ok = (integration_res.get("status") == "ALL_GREEN")
+    all_ok = app_ok and bff_ok and integ_ok
+
+    status_badge = "✅ ALL GREEN" if all_ok else "❌ FAILED"
+
     traceability_rows = []
     for bid, desc in biz_rules:
         traceability_rows.append(
-            f"| `{bid}` | {desc} | `@covers:{bid}` | `src/app/tests/test_{clean_id}.py`<br>`src/bff/tests/test_{clean_id}.py` | `src/app/{clean_id}_service.py`<br>`src/bff/{clean_id}_service.py` | ✅ ALL GREEN |"
+            f"| `{bid}` | {desc} | `@covers:{bid}` | `src/app/tests/test_{clean_id}.py`<br>`src/bff/tests/test_{clean_id}.py` | `src/app/{clean_id}_service.py`<br>`src/bff/{clean_id}_service.py` | {status_badge} |"
         )
     traceability_table = "\n".join(traceability_rows)
 
-    guard_app = app_res.get("rule_guard", {}).get("category", "SUCCESS")
-    guard_bff = bff_res.get("rule_guard", {}).get("category", "SUCCESS")
-    guard_integ = integration_res.get("rule_guard", {}).get("category", "SUCCESS")
+    guard_app = app_res.get("rule_guard", {}).get("category", "UNKNOWN")
+    guard_bff = bff_res.get("rule_guard", {}).get("category", "UNKNOWN")
+    guard_integ = integration_res.get("rule_guard", {}).get("category", "UNKNOWN")
+
+    chk_app = "x" if app_ok else " "
+    chk_bff = "x" if bff_ok else " "
+    chk_integ = "x" if integ_ok else " "
+    integ_label = "合格" if integ_ok else "不合格"
 
     return f"""## 📌 概要
 自律開発パイプライン (v3.0) により、PBI `{pbi_id}` に対する要件分析から結合テストまでを全自動完了した Pull Request です。
@@ -861,15 +899,14 @@ def _build_pr_body(
 
 ---
 
-## 🧪 検証実績 (Integration Gate 合格)
+## 🧪 検証実績 (Integration Gate {integ_label})
 
 - [x] **Phase 1: Example Mapping 人間ゲート 1 承認済** (`specs/example-maps/{pbi_id}.md`)
 - [x] **Phase 1-3: App / BFF Gherkin 分解 ＆ @covers タグ付与**
 - [x] **Phase 2: OpenAPI 3.0 スキーマ人間ゲート 2 承認済** (`specs/api/v1/{pbi_id}.yaml`)
-- [x] **Phase 4-1: DDD アーキテクチャ設計書策定** (`tasks/{pbi_id}/app/design.md`, `tasks/{pbi_id}/bff/design.md`)
-- [x] **Phase 4-2: TDD 厳格サイクル (Red 失敗保証 -> Green 実装 -> Refactor)**
-- [x] **Phase 5: 0 トークン Rule Guard 機械検証** (App: `{guard_app}`, BFF: `{guard_bff}`)
-- [x] **Phase 6: 結合検証 (Integration Gate)**: App-BFF エンドツーエンド契約適合性検証 合格 (`{guard_integ}`)
+- [{chk_app}] **Phase 4-1 & 4-2: App TDD サイクル** (Rule Guard: `{guard_app}`)
+- [{chk_bff}] **Phase 4-1 & 4-2: BFF TDD サイクル** (Rule Guard: `{guard_bff}`)
+- [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: App-BFF エンドツーエンド契約適合性検証 {integ_label} (`{guard_integ}`)
 
 ---
 
@@ -887,16 +924,17 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
 
     repo_slug = _get_repo_slug()
     branch = _get_current_branch()
+    base_branch = os.environ.get("BASE_BRANCH", "main")
 
-    if branch == "main":
-        logger.info("Currently on main branch. Cannot create PR from main to main.")
+    if branch == base_branch:
+        logger.info(f"Currently on {base_branch} branch. Cannot create PR from {base_branch} to {base_branch}.")
         return None
 
     url = f"https://api.github.com/repos/{repo_slug}/pulls"
     payload = json.dumps({
         "title": title,
         "head": branch,
-        "base": "main",
+        "base": base_branch,
         "body": body,
     }).encode("utf-8")
 
@@ -912,7 +950,7 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
     )
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             pr_url = data.get("html_url")
             logger.info(f"Successfully created GitHub PR: {pr_url}")
@@ -950,8 +988,9 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"Integration Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
+    is_passed = (guard_result.next_action == NextAction.PROCEED)
     integration_res = {
-        "status": "ALL_GREEN" if guard_result.next_action == NextAction.PROCEED else "FAILED",
+        "status": "ALL_GREEN" if is_passed else "FAILED",
         "rule_guard": guard_result.to_dict(),
         "test_file": str(test_file),
     }
@@ -962,14 +1001,25 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
     _ensure_dir(pr_file.parent)
     pr_file.write_text(pr_body, encoding="utf-8")
 
-    # 5. GitHub PR 起票の試行
+    # 結合検証失敗時は PR 起票を阻止し、FAILED を返却 (Issue 1)
+    if not is_passed:
+        logger.error(f"Integration gate failed for {pbi_id}. Skipping GitHub PR creation.")
+        return {
+            "pbi_id": pbi_id,
+            "status": "FAILED",
+            "pr_url": None,
+            "pr_summary_path": str(pr_file),
+            "integration_status": "FAILED",
+        }
+
+    # 5. GitHub PR 起票の試行（合格時のみ実行、asyncio.to_thread で非同期委任） (Issue 2)
     pr_title = f"feat({pbi_id.lower()}): 自律開発パイプラインによる実装と結合検証完了"
-    pr_url = _create_github_pr(pbi_id, pr_title, pr_body)
+    pr_url = await asyncio.to_thread(_create_github_pr, pbi_id, pr_title, pr_body)
 
     return {
         "pbi_id": pbi_id,
         "status": "COMPLETED",
         "pr_url": pr_url,
         "pr_summary_path": str(pr_file),
-        "integration_status": integration_res.get("status"),
+        "integration_status": "ALL_GREEN",
     }
