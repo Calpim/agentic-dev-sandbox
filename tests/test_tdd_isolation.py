@@ -18,6 +18,7 @@ def run_guard(payload: dict, env_vars: dict = None) -> dict:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
         env=env,
     )
     stdout, stderr = proc.communicate(json.dumps(payload))
@@ -109,6 +110,7 @@ def test_empty_or_invalid_payload_safe_fallback():
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
     )
     stdout, _ = proc.communicate("")
     res = json.loads(stdout.strip())
