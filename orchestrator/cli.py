@@ -80,6 +80,25 @@ def status(workflow_id: str = typer.Argument(..., help="Workflow ID")):
         table.add_row("人間ゲート 2 (OpenAPI Schema)", sc_status)
 
         console.print(table)
+
+        stage = status_data.get("stage", "")
+        pbi_id = status_data.get("pbi_id", "")
+        if stage == "WAITING_HUMAN_GATE_1_EXAMPLE_MAP":
+            console.print(Panel(
+                f"[bold cyan]人間ゲート 1 待機中[/bold cyan]\n"
+                f"対象ファイル: `specs/example-maps/{pbi_id}.md`\n\n"
+                f"承認する場合: `python orchestrator/cli.py approve-example-map {workflow_id}`\n"
+                f"修正指示する場合: `python orchestrator/cli.py reject-example-map {workflow_id} --feedback \"指示内容\"`",
+                title="Action Required: Gate 1"
+            ))
+        elif stage == "WAITING_HUMAN_GATE_2_SCHEMA":
+            console.print(Panel(
+                f"[bold cyan]人間ゲート 2 待機中 (OpenAPI スキーマレビュー)[/bold cyan]\n"
+                f"対象ファイル: `specs/api/v1/{pbi_id}.yaml`\n\n"
+                f"承認する場合: `python orchestrator/cli.py approve-schema {workflow_id}`\n"
+                f"修正指示する場合: `python orchestrator/cli.py reject-schema {workflow_id} --feedback \"指示内容\"`",
+                title="Action Required: Gate 2"
+            ))
     asyncio.run(_run())
 
 @app.command()
