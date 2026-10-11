@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 import subprocess
 import json
 import logging
@@ -7,6 +8,10 @@ import re
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
+
+def _to_pascal_case(identifier: str) -> str:
+    """ハイフンやアンダースコア区切りの文字列を PascalCase / CamelCase に変換する"""
+    return re.sub(r"[^a-zA-Z0-9]+", " ", identifier).title().replace(" ", "")
 
 from temporalio import activity
 
@@ -534,7 +539,7 @@ async def _call_gemini_for_design(pbi_id: str, component: str, spec_content: str
         return None
 
 def _fallback_design_doc(pbi_id: str, component: str, spec_content: str) -> str:
-    clean_name = pbi_id.replace('-', '_').title().replace('_', '')
+    clean_name = _to_pascal_case(pbi_id)
     return f"""# Architecture & DDD Design: {pbi_id} ({component.upper()})
 
 ## 1. 責務と概要
@@ -584,7 +589,7 @@ def _clean_id(pbi_id: str) -> str:
 
 def _generate_test_code(pbi_id: str, component: str) -> str:
     clean_id = _clean_id(pbi_id)
-    class_name = f"{clean_id.title().replace('_', '')}Service"
+    class_name = f"{_to_pascal_case(pbi_id)}Service"
     return f"""import pytest
 from src.{component}.{clean_id}_service import {class_name}
 
@@ -602,7 +607,7 @@ def test_{clean_id}_validation_error():
 
 def _generate_impl_code(pbi_id: str, component: str) -> str:
     clean_id = _clean_id(pbi_id)
-    class_name = f"{clean_id.title().replace('_', '')}Service"
+    class_name = f"{_to_pascal_case(pbi_id)}Service"
     return f"""from typing import Dict, Any
 
 class {class_name}:
@@ -621,20 +626,30 @@ class {class_name}:
         }}
 """
 
-def _run_pytest_on_target(test_file: Path) -> Tuple[int, str, str]:
+async def _run_pytest_on_target(test_file: Path, timeout: float = 30.0) -> Tuple[int, str, str]:
+    """非同期サブプロセスで pytest を実行し、Workerのイベントループを停止させない"""
     cmd = [sys.executable, "-m", "pytest", str(test_file), "-v"]
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(BASE_DIR)
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=str(BASE_DIR),
-        env=env,
-    )
-    return proc.returncode, proc.stdout, proc.stderr
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{BASE_DIR}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(BASE_DIR)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(BASE_DIR),
+            env=env,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return proc.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        return -1, "", f"TimeoutError: pytest execution timed out after {timeout} seconds"
 
 @activity.defn
 async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dict[str, Any]) -> Dict[str, Any]:
@@ -659,7 +674,6 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     # 1. RED (失敗するテストコード作成のみ可)
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "RED")
-    os.environ["TDD_PHASE"] = "RED"
     logger.info(f"[{component}] TDD Phase: RED - Creating failing tests at {test_file}")
     
     if impl_file.exists():
@@ -668,44 +682,59 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     test_code = _generate_test_code(pbi_id, component)
     test_file.write_text(test_code, encoding="utf-8")
 
-    # RED 検証: 実装がないためテストが失敗することを確認
-    red_code, red_out, red_err = _run_pytest_on_target(test_file)
+    # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
+    red_code, red_out, red_err = await _run_pytest_on_target(test_file)
     logger.info(f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})")
+    if red_code == 0:
+        logger.error(f"[{component}] TDD RED phase violation: Tests passed unexpectedly without implementation.")
+        _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
+        return {
+            "tdd_status": "RED_PHASE_VIOLATION",
+            "component": component,
+            "error": "TDD RED phase violation: Tests passed unexpectedly without implementation. Tests must assert actual business logic.",
+        }
 
     # ---------------------------------------------------------
     # 2. GREEN (プロダクション実装のみ可、テスト改ざん不可)
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "GREEN")
-    os.environ["TDD_PHASE"] = "GREEN"
     logger.info(f"[{component}] TDD Phase: GREEN - Implementing solution at {impl_file}")
 
     impl_code = _generate_impl_code(pbi_id, component)
     impl_file.write_text(impl_code, encoding="utf-8")
 
-    # GREEN 検証: テストが通ることを確認
-    green_code, green_out, green_err = _run_pytest_on_target(test_file)
+    # GREEN 検証: テストが通ることを確認 (非同期 & 早期ハンドリング)
+    green_code, green_out, green_err = await _run_pytest_on_target(test_file)
     logger.info(f"[{component}] Green phase check: exit_code={green_code} (Expect == 0: {'OK' if green_code == 0 else 'FAIL'})")
+    if green_code != 0:
+        logger.warning(f"[{component}] TDD GREEN phase failed: exit_code={green_code}")
+        guard_result = classify_execution_output(exit_code=green_code, stdout=green_out, stderr=green_err)
+        _update_pipeline_phase(pbi_id, component, "GREEN", "FAILED")
+        return {
+            "tdd_status": "GREEN_FAILED",
+            "component": component,
+            "test_file": str(test_file),
+            "impl_file": str(impl_file),
+            "rule_guard": guard_result.to_dict(),
+        }
 
     # ---------------------------------------------------------
     # 3. REFACTOR (コードクリーンアップ)
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "REFACTOR")
-    os.environ["TDD_PHASE"] = "REFACTOR"
     logger.info(f"[{component}] TDD Phase: REFACTOR - Code cleanup")
 
     # ---------------------------------------------------------
     # 4. VERIFY (Phase 5: Rule Guard による 0 トークン機械的検証)
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "VERIFY")
-    os.environ["TDD_PHASE"] = "VERIFY"
     logger.info(f"[{component}] Phase 5: Verification with Rule Guard (0-token)")
 
-    verify_code, verify_out, verify_err = _run_pytest_on_target(test_file)
+    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_file)
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"[{component}] Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
     _update_pipeline_phase(pbi_id, component, "DONE", "COMPLETED")
-    os.environ["TDD_PHASE"] = ""
 
     return {
         "tdd_status": "ALL_GREEN" if guard_result.next_action == NextAction.PROCEED else "FAILED",

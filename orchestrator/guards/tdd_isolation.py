@@ -19,15 +19,11 @@ TEST_PATTERN = re.compile(
 SCHEMA_PATTERN = re.compile(r"specs[/\\]api[/\\]")
 
 def get_current_phase(norm_path: str) -> str:
-    """環境変数または tasks/**/state.json から現在のTDDフェーズを特定する"""
-    # 1. 環境変数からの取得
-    env_phase = os.environ.get("TDD_PHASE", "").strip().upper()
-    if env_phase:
-        return env_phase
-
-    # 2. state.json からの判定
+    """tasks/**/state.json からコンポーネントに応じたTDDフェーズを特定する (環境変数はフォールバック)"""
     repo_root = Path(__file__).resolve().parent.parent.parent
     tasks_dir = repo_root / "tasks"
+
+    # 1. state.json からのコンポーネント別フェーズ特定 (Single Source of Truth)
     if tasks_dir.exists():
         for pbi_dir in tasks_dir.iterdir():
             state_file = pbi_dir / "state.json"
@@ -48,6 +44,12 @@ def get_current_phase(norm_path: str) -> str:
                             return c_phase
                 except Exception:
                     pass
+
+    # 2. 単体テストやスタンドアローン実行用フォールバック (環境変数)
+    env_phase = os.environ.get("TDD_PHASE", "").strip().upper()
+    if env_phase:
+        return env_phase
+
     return ""
 
 def respond(decision: str, reason: str = ""):
