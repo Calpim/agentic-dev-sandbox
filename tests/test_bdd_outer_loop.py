@@ -18,7 +18,7 @@ from orchestrator.activities import (
 @pytest.fixture(autouse=True)
 def cleanup_bdd_test_artifacts():
     """BDD 外側ループテスト用の一時ファイルをクリーンアップ"""
-    test_pbis = ["PBI-BDD-001", "PBI-BDD-002", "PBI-BDD-003"]
+    test_pbis = ["PBI-BDD-001", "PBI-BDD-002", "PBI-BDD-003", "PBI-BDD-004"]
 
     def _clean():
         for pbi in test_pbis:
@@ -69,7 +69,7 @@ def test_generate_bdd_step_code():
 
 @pytest.mark.asyncio
 async def test_call_gemini_for_bdd_steps_mock():
-    """Gemini API を用いた BDD Step Definition 生成のモックテスト"""
+    """Gemini API を用いた BDD Step Definition 生成のモックテスト (指示伝搬およびモデル指定の検証)"""
     mock_steps = "# Generated BDD steps\nfrom pytest_bdd import scenarios\nscenarios('test.feature')"
 
     mock_client = MagicMock()
@@ -77,10 +77,17 @@ async def test_call_gemini_for_bdd_steps_mock():
     mock_response.text = f"```python\n{mock_steps}\n```"
     mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
-    with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key"}):
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "fake_key", "SPEC_BDD_MODEL": "gemini-test-custom"}):
         with patch("google.genai.Client", return_value=mock_client):
-            result = await _call_gemini_for_bdd_steps("PBI-BDD-001", "app", "Feature: Test")
+            result = await _call_gemini_for_bdd_steps(
+                "PBI-BDD-001", "app", "Feature: Test", directive_instruction="Fix fixture requirement"
+            )
             assert result == mock_steps
+
+            # directive_instruction およびモデル名が正しく伝搬されていること
+            call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
+            assert call_kwargs.get("model") == "gemini-test-custom"
+            assert "Fix fixture requirement" in call_kwargs.get("contents", "")
 
 
 def test_generate_integration_bdd_test_code():
@@ -241,3 +248,44 @@ class PbiBdd003Service:
         assert "二重ループ TDD" in pr_content or "二重ループ" in pr_content
         assert "ビジネス Gherkin 受け入れ検証" in pr_content
         assert "重点レビュー箇所" in pr_content
+
+
+@pytest.mark.asyncio
+async def test_integration_and_pr_activity_without_business_feature():
+    """ビジネス Feature 未作成時、ダミー BDD テストが作成されず、ユニット結合テスト単体で ALL GREEN となること"""
+    pbi_id = "PBI-BDD-004"
+    clean_id = pbi_id.lower().replace("-", "_")
+
+    # App および BFF のサービス実装ファイルを配置
+    for comp in ("app", "bff"):
+        c_dir = BASE_DIR / "src" / comp
+        c_dir.mkdir(parents=True, exist_ok=True)
+        impl_file = c_dir / f"{clean_id}_service.py"
+        impl_file.write_text(
+            f"""from typing import Dict, Any
+class PbiBdd004Service:
+    def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        ident = payload.get("identifier", "default")
+        return {{"success": True, "status_code": 200, "identifier": ident, "component": "{comp}"}}
+""",
+            encoding="utf-8",
+        )
+
+    app_res = {"status": "SUCCESS", "tdd_status": "ALL_GREEN", "rule_guard": {"category": "SUCCESS"}}
+    bff_res = {"status": "SUCCESS", "tdd_status": "ALL_GREEN", "rule_guard": {"category": "SUCCESS"}}
+
+    with patch("orchestrator.activities._create_github_pr", return_value="https://github.com/mock/pr/999"):
+        result = await integration_and_pr_activity(pbi_id, app_res, bff_res)
+
+        assert result["status"] == "COMPLETED"
+        assert result["integration_status"] == "ALL_GREEN"
+        assert result["bdd_test_file"] is None
+
+        # ダミー BDD テストファイルが存在しないこと
+        dummy_bdd_file = BASE_DIR / "src" / "integration" / "tests" / f"test_{clean_id}_bdd_integration.py"
+        assert not dummy_bdd_file.exists()
+
+        # PR サマリーの内容を検証 (契約適合性検証のみ表記され、誤認のないこと)
+        pr_content = Path(result["pr_summary_path"]).read_text(encoding="utf-8")
+        assert "App-BFF 契約適合性検証" in pr_content
+        assert "ビジネス Gherkin 受け入れ検証" not in pr_content

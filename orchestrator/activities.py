@@ -666,7 +666,12 @@ class {class_name}:
 """
 
 
-async def _call_gemini_for_bdd_steps(pbi_id: str, component: str, feature_content: str) -> Optional[str]:
+async def _call_gemini_for_bdd_steps(
+    pbi_id: str,
+    component: str,
+    feature_content: str,
+    directive_instruction: Optional[str] = None,
+) -> Optional[str]:
     """Gemini API を利用して Gherkin フィーチャーに対応する pytest-bdd Step Definitions を生成する"""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -675,11 +680,17 @@ async def _call_gemini_for_bdd_steps(pbi_id: str, component: str, feature_conten
         from google import genai
 
         client = genai.Client(api_key=api_key)
-        model_name = os.getenv("SPEC_AGENT_MODEL", "gemini-2.5-pro")
+        model_name = os.getenv("SPEC_BDD_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-2.5-pro"))
 
         clean_id = _clean_id(pbi_id)
         service_class = f"{_to_pascal_case(pbi_id)}Service"
         feat_path_str = (BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature").as_posix()
+
+        directive_section = (
+            f"\n# 直前の失敗に対する改善指示 (Analyzer Directive):\n{directive_instruction}\n"
+            if directive_instruction
+            else ""
+        )
 
         prompt = f"""あなたは BDD (pytest-bdd) の自動テストエンジニアです。
 以下の Gherkin フィーチャー仕様書を読み、pytest-bdd を用いた受け入れテスト (Step Definitions) の Python コードを生成してください。
@@ -688,7 +699,7 @@ async def _call_gemini_for_bdd_steps(pbi_id: str, component: str, feature_conten
 # 対象コンポーネント: {component}
 # 対象フィーチャー仕様:
 {feature_content}
-
+{directive_section}
 # 要件:
 1. `from pytest_bdd import scenarios, given, when, then, parsers` をインポートすること。
 2. フィーチャーファイルのパスは `FEATURE_FILE = Path(r"{feat_path_str}")` を定義し、`if FEATURE_FILE.exists(): scenarios(str(FEATURE_FILE))` で読み込むこと。
@@ -759,9 +770,7 @@ async def _run_pytest_on_target(
 ) -> Tuple[int, str, str]:
     """非同期サブプロセスで pytest を実行し、Workerのイベントループを停止させない (単一または複数ターゲットに対応)"""
     if isinstance(test_target, list):
-        targets = [str(t) for t in test_target if Path(t).exists()]
-        if not targets:
-            targets = [str(t) for t in test_target]
+        targets = [str(t) for t in test_target]
     else:
         targets = [str(test_target)]
 
@@ -840,7 +849,9 @@ async def run_tdd_cycle_activity(
         test_targets = [test_file]
 
         if has_feature:
-            bdd_code = await _call_gemini_for_bdd_steps(pbi_id, component, feature_file.read_text(encoding="utf-8"))
+            bdd_code = await _call_gemini_for_bdd_steps(
+                pbi_id, component, feature_file.read_text(encoding="utf-8"), directive_instruction=directive_inst
+            )
             if not bdd_code:
                 bdd_code = _generate_bdd_step_code(pbi_id, component, directive_instruction=directive_inst)
             bdd_file.write_text(bdd_code, encoding="utf-8")
@@ -1286,6 +1297,12 @@ def _build_pr_body(
 """
         reviewer_extra = "\n3. **Analyzer による自己修復 (FIX_TEST / RETRY_IMPL)** が発生したコンポーネントについて、指示内容およびテスト/実装の修正妥当性を重点的にご確認ください。"
 
+    has_integ_bdd = bool(integration_res.get("bdd_test_file"))
+    integ_scope = "App-BFF 契約適合性 ＆ ビジネス Gherkin 受け入れ検証" if has_integ_bdd else "App-BFF 契約適合性検証"
+    bdd_reviewer_note = (
+        f" および結合 BDD テスト (`src/integration/tests/test_{clean_id}_bdd_integration.py`)" if has_integ_bdd else ""
+    )
+
     return f"""## 📌 概要
 自律開発パイプライン (v3.0) により、PBI `{pbi_id}` に対する要件分析から結合テストまでを全自動完了した Pull Request です。
 
@@ -1306,13 +1323,13 @@ def _build_pr_body(
 - [x] **Phase 2: OpenAPI 3.0 スキーマ人間ゲート 2 承認済** (`specs/api/v1/{pbi_id}.yaml`)
 - [{chk_app}] **Phase 4-1 & 4-2: App TDD サイクル** (二重ループ: 内側ユニット + 外側 BDD / Rule Guard: `{guard_app}`)
 - [{chk_bff}] **Phase 4-1 & 4-2: BFF TDD サイクル** (二重ループ: 内側ユニット + 外側 BDD / Rule Guard: `{guard_bff}`)
-- [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: App-BFF 契約適合性 ＆ ビジネス Gherkin 受け入れ検証 {integ_label} (`{guard_integ}`)
+- [{chk_integ}] **Phase 6: 結合検証 (Integration Gate)**: {integ_scope} {integ_label} (`{guard_integ}`)
 {analyzer_section}
 ---
 
 ## 👀 レビュアーへの確認ポイント (重点レビュー箇所)
 1. トレーサビリティ表の `BIZ-ID` が、Example Map の受け入れ基準をすべて網羅していることをご確認ください。
-2. 二重ループ TDD の外側受け入れテスト (`src/*/tests/test_{clean_id}_bdd.py`) および結合 BDD テスト (`src/integration/tests/test_{clean_id}_bdd_integration.py`) が、Gherkin 仕様の振る舞い要件を正確に検証していることをご確認ください。
+2. 二重ループ TDD の外側受け入れテスト (`src/*/tests/test_{clean_id}_bdd.py`){bdd_reviewer_note} が、Gherkin 仕様の振る舞い要件を正確に検証していることをご確認ください。
 3. 結合テスト (`src/integration/tests/test_{clean_id}_integration.py`) が App と BFF 間のリクエスト・レスポンス契約を満たしていることをご確認ください。{reviewer_extra}
 """
 
@@ -1388,12 +1405,19 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
     integ_test_code = _generate_integration_test_code(pbi_id)
     test_file.write_text(integ_test_code, encoding="utf-8")
 
-    bdd_test_file = integ_test_dir / f"test_{clean_id}_bdd_integration.py"
-    integ_bdd_code = _generate_integration_bdd_test_code(pbi_id)
-    bdd_test_file.write_text(integ_bdd_code, encoding="utf-8")
+    biz_feat_file = BASE_DIR / "specs" / "features" / "business" / f"{pbi_id}.feature"
+    test_targets = [test_file]
+    bdd_test_file_path: Optional[str] = None
 
-    # 3. 結合テスト実行 (非同期 pytest で両方を同時実行)
-    verify_code, verify_out, verify_err = await _run_pytest_on_target([test_file, bdd_test_file])
+    if biz_feat_file.exists():
+        bdd_test_file = integ_test_dir / f"test_{clean_id}_bdd_integration.py"
+        integ_bdd_code = _generate_integration_bdd_test_code(pbi_id)
+        bdd_test_file.write_text(integ_bdd_code, encoding="utf-8")
+        test_targets.append(bdd_test_file)
+        bdd_test_file_path = str(bdd_test_file)
+
+    # 3. 結合テスト実行 (非同期 pytest)
+    verify_code, verify_out, verify_err = await _run_pytest_on_target(test_targets)
     guard_result = classify_execution_output(exit_code=verify_code, stdout=verify_out, stderr=verify_err)
     logger.info(f"Integration Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")
 
@@ -1402,7 +1426,7 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
         "status": "ALL_GREEN" if is_passed else "FAILED",
         "rule_guard": guard_result.to_dict(),
         "test_file": str(test_file),
-        "bdd_test_file": str(bdd_test_file),
+        "bdd_test_file": bdd_test_file_path,
     }
 
     # 4. PR サマリー生成 & tasks/ 保存
@@ -1432,4 +1456,5 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
         "pr_url": pr_url,
         "pr_summary_path": str(pr_file),
         "integration_status": "ALL_GREEN",
+        "bdd_test_file": bdd_test_file_path,
     }
