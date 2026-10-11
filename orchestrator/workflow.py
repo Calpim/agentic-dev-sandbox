@@ -356,7 +356,7 @@ class ComponentPipelineWorkflow:
                 )
                 current_directive = None
             elif directive_type in ("FIX_TEST", "RETRY_IMPL", "RESYNC"):
-                # 指示内容を持って次の TDD サイクルへ
+                # 指示内容を持って次の TDD サイクルへ (FIX_TEST/RETRY_IMPL: Analyzer指示, RESYNC: 親ワークフローからの再同期初期指示)
                 continue
             else:
                 break

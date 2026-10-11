@@ -271,7 +271,12 @@ def run_interactive(
 
     async def _run():
         runner = InteractiveWorkflowRunner(pbi_id=pbi_id, pbi_content=description)
-        result = await runner.run()
+        try:
+            result = await runner.run()
+        except KeyboardInterrupt:
+            console.print("\n[yellow]ユーザー操作によりワークフローが中断されました。[/yellow]")
+            return
+
         if result.get("status") == "COMPLETED":
             console.print(
                 Panel(

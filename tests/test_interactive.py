@@ -254,3 +254,13 @@ async def test_run_single_step():
         res = await run_single_step("example_map", pbi_id, "content")
         assert res["step"] == "example_map"
         assert res["path"] == "dummy.md"
+
+    # draft_schema で decomp_result 未指定時に自動探索辞書が渡されること
+    with patch("orchestrator.interactive.draft_schema_activity", new_callable=AsyncMock) as m_draft:
+        m_draft.return_value = "specs/api/v1/PBI-INT-005.yaml"
+        res = await run_single_step("draft_schema", pbi_id)
+        assert res["step"] == "draft_schema"
+        assert m_draft.called
+        passed_decomp = m_draft.call_args[0][1]
+        assert "bff" in passed_decomp
+        assert "business" in passed_decomp

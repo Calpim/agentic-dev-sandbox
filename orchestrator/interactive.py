@@ -26,6 +26,7 @@ from orchestrator.activities import (
 
 logger = logging.getLogger("orchestrator.interactive")
 console = Console()
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Callback types:
 # Returns (approved: bool, feedback: Optional[str])
@@ -113,7 +114,7 @@ class InteractiveWorkflowRunner:
         # -------------------------------------------------------------
         await self._notify("PHASE_1_EXAMPLE_MAPPING", f"Generating Example Map for {pbi_id}...")
         example_map_feedback: Optional[str] = None
-        example_map_path = f"specs/example-maps/{pbi_id}.md"
+        example_map_path = str(BASE_DIR / "specs" / "example-maps" / f"{pbi_id}.md")
 
         while True:
             example_map_path = await generate_example_map_activity(pbi_id, pbi_content, example_map_feedback)
@@ -143,7 +144,7 @@ class InteractiveWorkflowRunner:
         # -------------------------------------------------------------
         await self._notify("PHASE_2_SCHEMA_DRAFT", "Drafting initial OpenAPI 3.1 specification...")
         schema_feedback: Optional[str] = None
-        schema_path = f"specs/api/v1/{pbi_id}.yaml"
+        schema_path = str(BASE_DIR / "specs" / "api" / "v1" / f"{pbi_id}.yaml")
 
         while True:
             schema_path = await draft_schema_activity(pbi_id, decomp_result, schema_feedback)
@@ -286,12 +287,18 @@ async def run_single_step(
         }
 
     elif step_name == "decompose":
-        map_path = extra_args.get("example_map_path", f"specs/example-maps/{pbi_id}.md")
+        map_path = extra_args.get("example_map_path", str(BASE_DIR / "specs" / "example-maps" / f"{pbi_id}.md"))
         res = await decompose_specs_activity(pbi_id, map_path)
         return {"step": step_name, "decomposition": res}
 
     elif step_name == "draft_schema":
-        decomp = extra_args.get("decomp_result", {})
+        decomp = extra_args.get("decomp_result")
+        if not decomp:
+            decomp = {
+                "business": str(BASE_DIR / "specs" / "gherkin" / "business" / f"{pbi_id}.feature"),
+                "app": str(BASE_DIR / "specs" / "gherkin" / "app" / f"{pbi_id}.feature"),
+                "bff": str(BASE_DIR / "specs" / "gherkin" / "bff" / f"{pbi_id}.feature"),
+            }
         path = await draft_schema_activity(pbi_id, decomp, feedback)
         return {
             "step": step_name,
@@ -300,7 +307,7 @@ async def run_single_step(
         }
 
     elif step_name == "initialize_tasks":
-        schema_path = extra_args.get("schema_path", f"specs/api/v1/{pbi_id}.yaml")
+        schema_path = extra_args.get("schema_path", str(BASE_DIR / "specs" / "api" / "v1" / f"{pbi_id}.yaml"))
         await initialize_tasks_activity(pbi_id, schema_path)
         return {"step": step_name, "status": "INITIALIZED"}
 
