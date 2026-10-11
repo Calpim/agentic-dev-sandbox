@@ -16,6 +16,8 @@ class WorkflowState:
     schema_approved: bool = False
     schema_feedback: Optional[str] = None
     stage: str = "INIT"
+    pr_url: Optional[str] = None
+    pr_summary_path: Optional[str] = None
 
 @workflow.defn
 class PBIDevelopmentWorkflow:
@@ -58,6 +60,8 @@ class PBIDevelopmentWorkflow:
             "stage": self.state.stage,
             "example_map_approved": self.state.example_map_approved,
             "schema_approved": self.state.schema_approved,
+            "pr_url": self.state.pr_url,
+            "pr_summary_path": self.state.pr_summary_path,
             "feedback": {
                 "example_map": self.state.example_map_feedback,
                 "schema": self.state.schema_feedback,
@@ -65,7 +69,7 @@ class PBIDevelopmentWorkflow:
         }
 
     @workflow.run
-    async def run(self, pbi_id: str, pbi_content: str) -> str:
+    async def run(self, pbi_id: str, pbi_content: str) -> Dict[str, Any]:
         self.state.pbi_id = pbi_id
         self.state.stage = "PHASE_1_EXAMPLE_MAPPING"
 
@@ -167,7 +171,12 @@ class PBIDevelopmentWorkflow:
             start_to_close_timeout=timedelta(minutes=10),
         )
 
-        self.state.stage = "COMPLETED"
+        self.state.pr_url = pr_result.get("pr_url")
+        self.state.pr_summary_path = pr_result.get("pr_summary_path")
+        if pr_result.get("status") == "COMPLETED":
+            self.state.stage = "COMPLETED"
+        else:
+            self.state.stage = "INTEGRATION_FAILED"
         return pr_result
 
 
