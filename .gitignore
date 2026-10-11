@@ -19,6 +19,7 @@ temporal-data/
 # Task execution artifacts & generated specs
 tasks/
 specs/
+src/
 .pytest_cache/
 
 # OS files
