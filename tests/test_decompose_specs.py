@@ -1,9 +1,11 @@
 import os
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from orchestrator.activities import decompose_specs_activity, _strip_markdown_codeblock
+import pytest
+
+from orchestrator.activities import _strip_markdown_codeblock, decompose_specs_activity
+
 
 @pytest.mark.asyncio
 async def test_fallback_decomposition_extracts_biz_rules(tmp_path):
@@ -30,7 +32,7 @@ async def test_fallback_decomposition_extracts_biz_rules(tmp_path):
     with patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}):
         with patch("orchestrator.activities._call_gemini_for_decomposition", new_callable=AsyncMock) as mock_gemini:
             mock_gemini.return_value = None
-            
+
             result = await decompose_specs_activity("PBI-999", str(map_file))
 
             assert "business" in result
@@ -51,6 +53,7 @@ async def test_fallback_decomposition_extracts_biz_rules(tmp_path):
             assert "@covers:BIZ-002" in app_content
             assert "@covers:BIZ-001" in bff_content
             assert "@covers:BIZ-002" in bff_content
+
 
 @pytest.mark.asyncio
 async def test_gemini_decomposition_output(tmp_path):
@@ -77,9 +80,10 @@ async def test_gemini_decomposition_output(tmp_path):
         assert app_content == mock_llm_response["app"]
         assert bff_content == mock_llm_response["bff"]
 
-def test_strip_markdown_codeblock():
-    raw_json = "```json\n{\"key\": \"value\"}\n```"
-    assert _strip_markdown_codeblock(raw_json) == "{\"key\": \"value\"}"
 
-    plain = "{\"key\": \"value\"}"
-    assert _strip_markdown_codeblock(plain) == "{\"key\": \"value\"}"
+def test_strip_markdown_codeblock():
+    raw_json = '```json\n{"key": "value"}\n```'
+    assert _strip_markdown_codeblock(raw_json) == '{"key": "value"}'
+
+    plain = '{"key": "value"}'
+    assert _strip_markdown_codeblock(plain) == '{"key": "value"}'

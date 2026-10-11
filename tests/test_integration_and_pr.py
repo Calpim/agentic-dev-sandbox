@@ -1,19 +1,19 @@
 import os
 import shutil
-import pytest
 import subprocess
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from orchestrator.activities import (
     BASE_DIR,
-    integration_and_pr_activity,
     _build_pr_body,
     _create_github_pr,
     _get_github_token,
-    _get_repo_slug,
-    _generate_integration_test_code,
+    integration_and_pr_activity,
 )
+
 
 @pytest.fixture(autouse=True)
 def cleanup_integration_artifacts():
@@ -23,7 +23,7 @@ def cleanup_integration_artifacts():
         integ_test = BASE_DIR / "src" / "integration" / "tests" / f"test_{clean_id}_integration.py"
         if integ_test.exists():
             integ_test.unlink()
-        
+
         # サービスのクリーンアップ
         for comp in ("app", "bff"):
             impl = BASE_DIR / "src" / comp / f"{clean_id}_service.py"
@@ -38,6 +38,7 @@ def cleanup_integration_artifacts():
     integ_dir = BASE_DIR / "src" / "integration"
     if integ_dir.exists():
         shutil.rmtree(integ_dir, ignore_errors=True)
+
 
 @pytest.mark.asyncio
 async def test_integration_and_pr_activity_success():
@@ -61,7 +62,10 @@ class Pbi801Service:
     app_res = {"status": "SUCCESS", "rule_guard": {"category": "SUCCESS"}}
     bff_res = {"status": "SUCCESS", "rule_guard": {"category": "SUCCESS"}}
 
-    with patch("orchestrator.activities._create_github_pr", return_value="https://github.com/Calpim/agentic-dev-sandbox/pull/999") as mock_pr:
+    with patch(
+        "orchestrator.activities._create_github_pr",
+        return_value="https://github.com/Calpim/agentic-dev-sandbox/pull/999",
+    ) as mock_pr:
         result = await integration_and_pr_activity(pbi_id, app_res, bff_res)
 
         assert result.get("status") == "COMPLETED"
@@ -70,7 +74,7 @@ class Pbi801Service:
         assert result.get("pr_url") == "https://github.com/Calpim/agentic-dev-sandbox/pull/999"
         mock_pr.assert_called_once()
 
-        summary_file = Path(result.get("pr_summary_path"))
+        summary_file = Path(str(result.get("pr_summary_path")))
         assert summary_file.exists()
         content = summary_file.read_text(encoding="utf-8")
         assert f"PBI `{pbi_id}`" in content
@@ -78,6 +82,7 @@ class Pbi801Service:
         assert "Integration Gate 合格" in content
         assert "✅ ALL GREEN" in content
         assert "- [x]" in content
+
 
 @pytest.mark.asyncio
 async def test_integration_and_pr_activity_failure():
@@ -87,7 +92,10 @@ async def test_integration_and_pr_activity_failure():
     bff_res = {"status": "SUCCESS", "rule_guard": {"category": "SUCCESS"}}
 
     # pytest 実行でアサーションエラー (exit_code=1) が発生するシチュエーションをモック
-    with patch("orchestrator.activities._run_pytest_on_target", return_value=(1, "FAILED test_integration", "AssertionError: Contract mismatch")):
+    with patch(
+        "orchestrator.activities._run_pytest_on_target",
+        return_value=(1, "FAILED test_integration", "AssertionError: Contract mismatch"),
+    ):
         with patch("orchestrator.activities._create_github_pr") as mock_pr:
             result = await integration_and_pr_activity(pbi_id, app_res, bff_res)
 
@@ -99,21 +107,25 @@ async def test_integration_and_pr_activity_failure():
             # PR 作成が呼び出されていないことを確認
             mock_pr.assert_not_called()
 
-            summary_file = Path(result.get("pr_summary_path"))
+            summary_file = Path(str(result.get("pr_summary_path")))
             assert summary_file.exists()
             content = summary_file.read_text(encoding="utf-8")
             assert "Integration Gate 不合格" in content
             assert "❌ FAILED" in content
             assert "- [ ]" in content
 
+
 def test_build_pr_body_traceability_table():
     pbi_id = "PBI-802"
     em_file = BASE_DIR / "specs" / "example-maps" / f"{pbi_id}.md"
     em_file.parent.mkdir(parents=True, exist_ok=True)
-    em_file.write_text("""# Example Map: PBI-802
+    em_file.write_text(
+        """# Example Map: PBI-802
 ## BIZ-001: 正常ログイン
 ## BIZ-002: アカウントロックアウト
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     app_res = {"status": "SUCCESS", "rule_guard": {"category": "SUCCESS"}}
     bff_res = {"status": "SUCCESS", "rule_guard": {"category": "SUCCESS"}}
@@ -134,6 +146,7 @@ def test_build_pr_body_traceability_table():
     if em_file.exists():
         em_file.unlink()
 
+
 def test_build_pr_body_dynamic_failure_badges():
     """失敗時の動的ステータス反映を確認 (Issue 3)"""
     pbi_id = "PBI-802"
@@ -149,16 +162,19 @@ def test_build_pr_body_dynamic_failure_badges():
     assert "- [x] **Phase 4-1 & 4-2: BFF TDD サイクル**" in body
     assert "- [ ] **Phase 6: 結合検証" in body
 
+
 def test_create_github_pr_offline_fallback():
     # トークンなしの場合、クラッシュせず None を返す
     with patch("orchestrator.activities._get_github_token", return_value=None):
         url = _create_github_pr("PBI-803", "title", "body")
         assert url is None
 
+
 def test_create_github_pr_mock():
-    mock_resp_data = {"html_url": "https://github.com/Calpim/agentic-dev-sandbox/pull/123"}
     mock_resp = MagicMock()
-    mock_resp.read.return_value = '{"html_url": "https://github.com/Calpim/agentic-dev-sandbox/pull/123"}'.encode("utf-8")
+    mock_resp.read.return_value = '{"html_url": "https://github.com/Calpim/agentic-dev-sandbox/pull/123"}'.encode(
+        "utf-8"
+    )
     mock_resp.__enter__.return_value = mock_resp
 
     with patch("orchestrator.activities._get_github_token", return_value="dummy-token"):
@@ -166,6 +182,7 @@ def test_create_github_pr_mock():
             with patch("urllib.request.urlopen", return_value=mock_resp):
                 url = _create_github_pr("PBI-803", "title", "body")
                 assert url == "https://github.com/Calpim/agentic-dev-sandbox/pull/123"
+
 
 def test_create_github_pr_env_overrides(monkeypatch):
     """環境変数によるリポジトリ・baseブランチの外部化設定テスト (Issue 4)"""
@@ -186,9 +203,11 @@ def test_create_github_pr_env_overrides(monkeypatch):
             called_req = mock_urlopen.call_args[0][0]
             assert "custom-org/custom-repo" in called_req.full_url
             import json
+
             req_data = json.loads(called_req.data.decode("utf-8"))
             assert req_data["base"] == "develop"
             assert req_data["head"] == "feature/env-test"
+
 
 def test_get_github_token_timeout_handling():
     """git credential helper タイムアウト時のプロセス強制終了テスト (Issue 5)"""

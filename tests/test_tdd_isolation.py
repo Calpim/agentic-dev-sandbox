@@ -3,10 +3,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 GUARD_SCRIPT = Path(__file__).resolve().parent.parent / "orchestrator" / "guards" / "tdd_isolation.py"
 
-def run_guard(payload: dict, env_vars: dict = None) -> dict:
+
+def run_guard(payload: dict, env_vars: Optional[dict] = None) -> dict:
     """Helper to run tdd_isolation.py with mock stdin and env vars"""
     env = os.environ.copy()
     if env_vars:
@@ -25,20 +27,16 @@ def run_guard(payload: dict, env_vars: dict = None) -> dict:
     assert proc.returncode == 0, f"Guard script crashed: {stderr}"
     return json.loads(stdout.strip())
 
+
 def make_payload(tool_name: str, target_file: str) -> dict:
-    return {
-        "toolCall": {
-            "name": tool_name,
-            "args": {
-                "TargetFile": target_file
-            }
-        }
-    }
+    return {"toolCall": {"name": tool_name, "args": {"TargetFile": target_file}}}
+
 
 def test_default_phase_allows_any_file():
     payload = make_payload("write_to_file", "src/models/user.py")
     res = run_guard(payload, {"TDD_PHASE": ""})
     assert res.get("decision") == "allow"
+
 
 def test_schema_protection_always_denies():
     # スキーマファイルはフェーズ問わず常に直接編集不可
@@ -48,9 +46,10 @@ def test_schema_protection_always_denies():
         assert res.get("decision") == "deny"
         assert "スキーマファイル" in res.get("reason", "")
 
+
 def test_red_phase_permissions():
     env = {"TDD_PHASE": "RED"}
-    
+
     # 失敗するテストの作成・編集は許可
     test_files = [
         "tests/unit/user.spec.ts",
@@ -75,6 +74,7 @@ def test_red_phase_permissions():
         assert res.get("decision") == "deny", f"Should deny {pf} in RED"
         assert "RED" in res.get("reason", "")
 
+
 def test_green_phase_permissions():
     env = {"TDD_PHASE": "GREEN"}
 
@@ -89,6 +89,7 @@ def test_green_phase_permissions():
     assert res.get("decision") == "deny"
     assert "GREEN" in res.get("reason", "")
 
+
 def test_refactor_phase_permissions():
     env = {"TDD_PHASE": "REFACTOR"}
 
@@ -102,6 +103,7 @@ def test_refactor_phase_permissions():
     res = run_guard(test_payload, env)
     assert res.get("decision") == "deny"
     assert "REFACTOR" in res.get("reason", "")
+
 
 def test_empty_or_invalid_payload_safe_fallback():
     # 不正な入力でも例外でエージェントを止めない
