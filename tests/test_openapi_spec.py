@@ -85,3 +85,41 @@ paths:
         assert content == mock_yaml
         parsed = yaml.safe_load(content)
         assert parsed["info"]["title"] == "Mocked PBI-666 API"
+
+@pytest.mark.asyncio
+async def test_multiline_feedback_with_quotes_in_fallback_schema(tmp_path):
+    pbi_id = "PBI-888"
+    decomp_result = {"bff": "", "business": "", "app": ""}
+    feedback = 'フィールド "item_id" を必須にして、\n形式チェック (UUIDv4) を追加してください'
+
+    with patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}):
+        with patch("orchestrator.activities._call_gemini_for_openapi", new_callable=AsyncMock) as mock_gemini:
+            mock_gemini.return_value = None
+
+            schema_path = await draft_schema_activity(pbi_id, decomp_result, feedback=feedback)
+            content = Path(schema_path).read_text(encoding="utf-8")
+
+            # 構文破壊せず正当なYAMLとしてパース可能であること
+            parsed = yaml.safe_load(content)
+            assert parsed["openapi"] == "3.0.3"
+            assert "item_id" in content
+
+@pytest.mark.asyncio
+async def test_gemini_invalid_yaml_triggers_fallback(tmp_path):
+    pbi_id = "PBI-999"
+    decomp_result = {"bff": "", "business": "", "app": ""}
+
+    # Geminiがdictではない単なる文字列を出力したケース
+    invalid_outputs = ["I cannot generate this specification.", "title: incomplete without openapi or paths"]
+    for bad_output in invalid_outputs:
+        from orchestrator.activities import _call_gemini_for_openapi
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "dummy_key", "GOOGLE_API_KEY": ""}):
+            with patch("google.genai.Client") as mock_client_cls:
+                mock_client = mock_client_cls.return_value
+                mock_resp = AsyncMock()
+                mock_resp.text = bad_output
+                mock_client.aio.models.generate_content = AsyncMock(return_value=mock_resp)
+                
+                res = await _call_gemini_for_openapi(pbi_id, "", "")
+                # Mapping不足やキー欠落でNoneにフォールバックされること
+                assert res is None

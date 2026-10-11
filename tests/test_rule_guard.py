@@ -60,3 +60,44 @@ def test_rule_guard_unknown_failure():
     res = classify_execution_output(exit_code=139, stdout=stdout)
     assert res.category == ErrorCategory.UNKNOWN_FAILURE
     assert res.next_action == NextAction.ESCALATE_ANALYZER
+
+def test_rule_guard_cli_empty_input():
+    import subprocess
+    import sys
+    import json
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    proc = subprocess.run(
+        [sys.executable, "-m", "orchestrator.guards.rule_guard"],
+        input="",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(repo_root),
+    )
+    assert proc.returncode == 0
+    data = json.loads(proc.stdout)
+    assert data["category"] == ErrorCategory.UNKNOWN_FAILURE.value
+    assert data["next_action"] == NextAction.ESCALATE_ANALYZER.value
+    assert "summary" in data
+    assert "details" in data
+
+def test_rule_guard_cli_valid_input():
+    import subprocess
+    import sys
+    import json
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parent.parent
+    payload = json.dumps({"exit_code": 0, "stdout": "All tests passed"})
+    proc = subprocess.run(
+        [sys.executable, "-m", "orchestrator.guards.rule_guard"],
+        input=payload,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(repo_root),
+    )
+    assert proc.returncode == 0
+    data = json.loads(proc.stdout)
+    assert data["category"] == ErrorCategory.SUCCESS.value
+    assert data["next_action"] == NextAction.PROCEED.value

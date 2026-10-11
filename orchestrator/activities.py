@@ -283,7 +283,7 @@ async def _call_gemini_for_openapi(
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        model_name = os.getenv("DESIGN_AGENT_MODEL", os.getenv("SPEC_AGENT_MODEL", "gemini-3.8-flash"))
+        model_name = os.getenv("DESIGN_AGENT_MODEL") or os.getenv("SPEC_AGENT_MODEL") or "gemini-3.8-flash"
         
         prompt = f"""あなたは API 仕様設計の専門家「Design Agent」です。
 以下の入力情報から、OpenAPI 3.0.3 規格に完全準拠した REST API スキーマ（YAML形式）を策定してください。
@@ -315,9 +315,12 @@ async def _call_gemini_for_openapi(
             contents=prompt,
         )
         cleaned_yaml = _strip_markdown_codeblock(response.text)
-        # 構文が正当な YAML であることを確認
+        # 構文が正当な OpenAPI YAML（Mapping構造）であることを確認
         try:
-            yaml.safe_load(cleaned_yaml)
+            parsed = yaml.safe_load(cleaned_yaml)
+            if not isinstance(parsed, dict) or "openapi" not in parsed or "paths" not in parsed:
+                logger.warning("Generated OpenAPI schema lacks required root keys ('openapi', 'paths')")
+                return None
             return cleaned_yaml
         except yaml.YAMLError as ye:
             logger.warning(f"Generated OpenAPI schema has invalid YAML syntax: {ye}")
@@ -327,70 +330,90 @@ async def _call_gemini_for_openapi(
         return None
 
 def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[str] = None) -> str:
-    """API キー未設定時やエラー時の動的フォールバック OpenAPI 生成"""
-    feedback_note = f"\n# ↺ 人間からの修正指示を反映: {feedback}\n" if feedback else ""
-    return f"""openapi: 3.0.3
-info:
-  title: {pbi_id} API Specification
-  version: 1.0.0
-  description: API contract for {pbi_id} derived from BDD BFF scenarios.{feedback_note}
-paths:
-  /api/v1/{pbi_id.lower()}:
-    post:
-      summary: Execute {pbi_id} operations
-      description: Auto-generated endpoint matching BFF Gherkin scenarios.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - identifier
-              properties:
-                identifier:
-                  type: string
-                  description: Unique identifier for the operation
-                  example: "{pbi_id.lower()}-sample-001"
-                payload:
-                  type: object
-                  description: Request parameters
-                  example: {{"action": "execute", "note": "{feedback if feedback else 'standard operation'}"}}
-      responses:
-        '200':
-          description: Operation succeeded
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  data:
-                    type: object
-                    example: {{"status": "completed", "pbi": "{pbi_id}"}}
-        '400':
-          description: Validation error or invalid request format
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "Validation failed"
-        '409':
-          description: Conflict with existing resource state
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    example: "Resource conflict"
-"""
+    """API キー未設定時やエラー時の動的フォールバック OpenAPI 生成 (安全な辞書ダンプ)"""
+    clean_note = feedback.replace("\n", " ") if feedback else "standard operation"
+    description = f"API contract for {pbi_id} derived from BDD BFF scenarios."
+    if feedback:
+        description += f"\nHuman Feedback: {feedback}"
+
+    schema_dict = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": f"{pbi_id} API Specification",
+            "version": "1.0.0",
+            "description": description,
+        },
+        "paths": {
+            f"/api/v1/{pbi_id.lower()}": {
+                "post": {
+                    "summary": f"Execute {pbi_id} operations",
+                    "description": "Auto-generated endpoint matching BFF Gherkin scenarios.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["identifier"],
+                                    "properties": {
+                                        "identifier": {
+                                            "type": "string",
+                                            "description": "Unique identifier for the operation",
+                                            "example": f"{pbi_id.lower()}-sample-001",
+                                        },
+                                        "payload": {
+                                            "type": "object",
+                                            "description": "Request parameters",
+                                            "example": {"action": "execute", "note": clean_note},
+                                        },
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Operation succeeded",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "success": {"type": "boolean", "example": True},
+                                            "data": {"type": "object", "example": {"status": "completed", "pbi": pbi_id}},
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        "400": {
+                            "description": "Validation error or invalid request format",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {"error": {"type": "string", "example": "Validation failed"}},
+                                    }
+                                }
+                            },
+                        },
+                        "409": {
+                            "description": "Conflict with existing resource state",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {"error": {"type": "string", "example": "Resource conflict"}},
+                                    }
+                                }
+                            },
+                        },
+                    },
+                }
+            }
+        },
+    }
+    return yaml.safe_dump(schema_dict, allow_unicode=True, sort_keys=False)
 
 @activity.defn
 async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feedback: Optional[str] = None) -> str:
@@ -514,6 +537,8 @@ async def run_tdd_cycle_activity(pbi_id: str, component: str, design_output: Dic
     logger.info(f"[{component}] Phase 5: Mechanical Verification with Rule Guard (0-token)")
     
     # 疑似実行ログ（本番では CI / pytest の結果文字列）を Rule Guard で評価
+    # NOTE: 実CI結合時は guard_result.next_action (DIRECT_FIX / SELF_RETRY / ESCALATE_ANALYZER) に応じて
+    # アクティビティ内または親ワークフローで自己リトライ／修正ループを分岐制御する
     mock_ci_output = f"PASSED 10 tests for {pbi_id} {component}"
     guard_result = classify_execution_output(exit_code=0, stdout=mock_ci_output)
     logger.info(f"[{component}] Rule Guard decision: {guard_result.category} -> {guard_result.next_action}")

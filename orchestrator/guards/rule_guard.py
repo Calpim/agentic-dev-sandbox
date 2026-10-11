@@ -169,9 +169,20 @@ def classify_execution_output(
     )
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
+
     raw_input = sys.stdin.read()
     if not raw_input.strip():
-        print(json.dumps({"decision": "allow", "reason": "empty input"}))
+        empty_res = RuleGuardResult(
+            category=ErrorCategory.UNKNOWN_FAILURE,
+            next_action=NextAction.ESCALATE_ANALYZER,
+            summary="Empty input received by Rule Guard",
+            details="",
+        )
+        print(json.dumps(empty_res.to_dict(), ensure_ascii=False, indent=2))
         sys.exit(0)
 
     try:
@@ -184,4 +195,10 @@ if __name__ == "__main__":
         result = classify_execution_output(exit_code, stdout, stderr, retry_count, max_retries)
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     except Exception as e:
-        print(json.dumps({"error": str(e), "category": "UNKNOWN_FAILURE", "next_action": "ESCALATE_ANALYZER"}))
+        err_res = RuleGuardResult(
+            category=ErrorCategory.UNKNOWN_FAILURE,
+            next_action=NextAction.ESCALATE_ANALYZER,
+            summary=f"Rule Guard execution error: {e}",
+            details=str(e),
+        )
+        print(json.dumps(err_res.to_dict(), ensure_ascii=False, indent=2))
