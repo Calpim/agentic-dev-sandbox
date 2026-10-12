@@ -1,7 +1,7 @@
 import re
 import tempfile
 from pathlib import Path
-from typing import Union
+from typing import Any, Dict, List, Union
 
 PBI_ID_PATTERN = re.compile(r"^PBI-[A-Za-z0-9_-]+$")
 
@@ -52,3 +52,59 @@ def validate_safe_path(
             pass
 
     raise ValueError(f"Path traversal detected: '{target_path}' is outside base directory '{base_dir}'.")
+
+
+def extract_biz_ids_from_example_map(example_map_content: str) -> List[str]:
+    """Example Map コンテンツから BIZ-xxx 識別子を重複なく出現順で抽出する (Issue #13)"""
+    matches = re.findall(r"##\s+(BIZ-\d+)", example_map_content)
+    seen = set()
+    result = []
+    for m in matches:
+        if m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
+
+
+def validate_gherkin_coverage(
+    example_map_content: str,
+    biz_gherkin: str,
+    app_gherkin: str,
+    bff_gherkin: str,
+    strict: bool = False,
+) -> Dict[str, Any]:
+    """
+    Gherkin 仕様が Example Map 内の全 BIZ ルールを網羅しているか検証する (Issue #13).
+    - ビジネス層: 各ルールに @BIZ-xxx タグが付与されていること
+    - App層: 各ルールに対して @covers:BIZ-xxx タグが付与されていること
+    - BFF層: 各ルールに対して @covers:BIZ-xxx タグが付与されていること
+    strict=True の場合、カバレッジ不足時に ValueError を発生させる (fail-closed)。
+    """
+    biz_ids = extract_biz_ids_from_example_map(example_map_content)
+    if not biz_ids:
+        biz_ids = ["BIZ-001", "BIZ-002"]
+
+    missing_biz = [bid for bid in biz_ids if f"@{bid}" not in biz_gherkin]
+    missing_app = [bid for bid in biz_ids if f"@covers:{bid}" not in app_gherkin]
+    missing_bff = [bid for bid in biz_ids if f"@covers:{bid}" not in bff_gherkin]
+
+    is_covered = len(missing_biz) == 0 and len(missing_app) == 0 and len(missing_bff) == 0
+
+    result = {
+        "is_covered": is_covered,
+        "biz_ids": biz_ids,
+        "missing_biz": missing_biz,
+        "missing_app": missing_app,
+        "missing_bff": missing_bff,
+    }
+
+    if strict and not is_covered:
+        raise ValueError(
+            f"Gherkin specification coverage validation failed (fail-closed)! "
+            f"Required BIZ rules: {biz_ids}. "
+            f"Missing in business: {missing_biz}, "
+            f"missing in app: {missing_app}, "
+            f"missing in bff: {missing_bff}"
+        )
+
+    return result

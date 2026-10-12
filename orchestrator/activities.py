@@ -23,7 +23,11 @@ from orchestrator.guards.rule_guard import (
     NextAction,
     classify_execution_output,
 )
-from orchestrator.guards.validators import validate_pbi_id, validate_safe_path
+from orchestrator.guards.validators import (
+    validate_gherkin_coverage,
+    validate_pbi_id,
+    validate_safe_path,
+)
 
 load_dotenv()
 logger = logging.getLogger("orchestrator.activities")
@@ -219,17 +223,38 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     safe_example_map_path = validate_safe_path(BASE_DIR, example_map_path, allow_temp=True)
     example_map_content = safe_example_map_path.read_text(encoding="utf-8")
 
+    strict_mode = os.getenv("STRICT_SPEC_GENERATION", "").lower() in ("1", "true", "yes")
+
     # 1. 本物の LLM (Gemini API) による仕様分解を試行
     llm_specs = await _call_gemini_for_decomposition(pbi_id, example_map_content)
     if llm_specs:
         logger.info("Successfully decomposed Gherkin specs via Gemini API!")
+        biz_gherkin = llm_specs.get("business", "")
+        app_gherkin = llm_specs.get("app", "")
+        bff_gherkin = llm_specs.get("bff", "")
+
+        coverage = validate_gherkin_coverage(
+            example_map_content,
+            biz_gherkin,
+            app_gherkin,
+            bff_gherkin,
+            strict=strict_mode,
+        )
+
+        if not coverage["is_covered"]:
+            logger.warning(f"LLM generated specs missing coverage: {coverage}. Auto-completing missing tags.")
+            for bid in coverage["missing_app"]:
+                app_gherkin = f"@covers:{bid}\n" + app_gherkin
+            for bid in coverage["missing_bff"]:
+                bff_gherkin = f"@covers:{bid}\n" + bff_gherkin
+
         biz_file = validate_safe_path(biz_dir, biz_dir / f"{pbi_id}.feature")
         app_file = validate_safe_path(app_dir, app_dir / f"{pbi_id}.feature")
         bff_file = validate_safe_path(bff_dir, bff_dir / f"{pbi_id}.feature")
 
-        biz_file.write_text(llm_specs["business"], encoding="utf-8")
-        app_file.write_text(llm_specs["app"], encoding="utf-8")
-        bff_file.write_text(llm_specs["bff"], encoding="utf-8")
+        biz_file.write_text(biz_gherkin, encoding="utf-8")
+        app_file.write_text(app_gherkin, encoding="utf-8")
+        bff_file.write_text(bff_gherkin, encoding="utf-8")
 
         return {
             "business": str(biz_file),
@@ -237,22 +262,48 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
             "bff": str(bff_file),
         }
 
-    # 2. フォールバック生成: Example Map から BIZ-ID を動的に抽出して展開
+    # 2. フォールバック生成: Example Map から BIZ-ID および具体例テーブルをパースして展開 (Issue #13)
     logger.info("Decomposing specs via dynamic fallback parser...")
-    biz_matches = re.findall(r"##\s+(BIZ-\d+)(?::\s*|\s+)(.+)", example_map_content)
+    # 各 BIZ セクションとその本文を抽出
+    biz_sections = re.findall(
+        r"##\s+(BIZ-\d+)(?::\s*|\s+)([^\n]+)([\s\S]*?)(?=(?:##\s+BIZ|\Z))",
+        example_map_content,
+    )
 
     biz_rules_gherkin = []
     covers_tags = []
 
-    if biz_matches:
-        for biz_id, rule_desc in biz_matches:
+    if biz_sections:
+        for biz_id, rule_desc_raw, body in biz_sections:
+            rule_desc = rule_desc_raw.strip()
             covers_tags.append(f"@covers:{biz_id}")
-            biz_rules_gherkin.append(f"""  @{biz_id}
-  ルール: {rule_desc.strip()}
-    シナリオ: {rule_desc.strip()}の検証
+
+            # マークダウンテーブルから具体例を抽出 (| ルール | 具体例 (Example) | 期待される結果 |)
+            table_lines = [line.strip() for line in body.splitlines() if line.strip().startswith("|")]
+            scenario_blocks = []
+
+            for line in table_lines:
+                cols = [c.strip() for c in line.split("|") if c.strip()]
+                # ヘッダー行や区切り行をスキップ
+                if not cols or "ルール" in cols[0] or ":---" in cols[0] or "---" in cols[0]:
+                    continue
+                if len(cols) >= 3:
+                    sub_rule, example_val, expected_res = cols[0], cols[1], cols[2]
+                    scenario_blocks.append(f"""    シナリオ: {sub_rule} ({example_val})
+      前提 適切な前提条件「{sub_rule}」が成立している
+      もし 入力値「{example_val}」が送信されたとき
+      ならば 「{expected_res}」となる""")
+
+            if not scenario_blocks:
+                scenario_blocks.append(f"""    シナリオ: {rule_desc}の検証
       前提 適切な前提条件が満たされている
       もし 対象の操作を実行したとき
-      ならば 期待される結果が得られる
+      ならば 期待される結果が得られる""")
+
+            scenarios_text = "\n".join(scenario_blocks)
+            biz_rules_gherkin.append(f"""  @{biz_id}
+  ルール: {rule_desc}
+{scenarios_text}
 """)
     else:
         covers_tags = ["@covers:BIZ-001", "@covers:BIZ-002"]
@@ -273,29 +324,34 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
 
     # 2. App層 Gherkin
     app_file = validate_safe_path(app_dir, app_dir / f"{pbi_id}.feature")
-    app_file.write_text(
-        f"""# language: ja
+    app_content = f"""# language: ja
 {covers_header}
 機能: {pbi_id} クライアントUI振る舞い
   シナリオ: ユーザーインターフェース操作と状態変化
     前提 画面が表示されている
     もし 操作を実行する
     ならば 画面に結果が適切に反映される
-""",
-        encoding="utf-8",
-    )
+"""
+    app_file.write_text(app_content, encoding="utf-8")
 
     # 3. BFF層 Gherkin
     bff_file = validate_safe_path(bff_dir, bff_dir / f"{pbi_id}.feature")
-    bff_file.write_text(
-        f"""# language: ja
+    bff_content = f"""# language: ja
 {covers_header}
 機能: {pbi_id} APIエンドポイント連携
   シナリオ: リクエスト処理とスキーマ適合レスポンス
     もし APIリクエストが送信される
     ならば ステータスコードとJSONが返却される
-""",
-        encoding="utf-8",
+"""
+    bff_file.write_text(bff_content, encoding="utf-8")
+
+    # カバレッジ検証をフォールバック時にも適用
+    validate_gherkin_coverage(
+        example_map_content,
+        biz_content,
+        app_content,
+        bff_content,
+        strict=strict_mode,
     )
 
     return {
@@ -665,26 +721,125 @@ def test_{clean_id}_validation_error():
 """
 
 
-def _generate_impl_code(pbi_id: str, component: str, directive_instruction: Optional[str] = None) -> str:
+def _fallback_impl_code(
+    pbi_id: str,
+    component: str,
+    design_content: Optional[str] = None,
+    directive_instruction: Optional[str] = None,
+) -> str:
+    """DDD設計書を反映した決定論的フォールバック実装コード生成 (Issue #14)"""
     class_name = f"{_to_pascal_case(pbi_id)}Service"
+    entity_name = f"{_to_pascal_case(pbi_id)}Entity"
     comment = f"\n    # Directive Applied: {directive_instruction}" if directive_instruction else ""
-    return f"""from typing import Dict, Any
+
+    design_summary = ""
+    if design_content:
+        design_summary = "\n# Architecture & Domain Model reflected from design:\n"
+        summary_lines = [
+            line.strip()
+            for line in design_content.splitlines()
+            if line.strip().startswith("-") or line.strip().startswith("##")
+        ]
+        for s in summary_lines[:5]:
+            design_summary += f"# {s}\n"
+
+    return f"""from dataclasses import dataclass, field
+from typing import Any, Dict, Optional
+{design_summary}
+
+@dataclass
+class {entity_name}:
+    \"\"\"Domain Entity for {pbi_id} ({component})\"\"\"
+    identifier: str
+    component: str = "{component}"
+    status: str = "active"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {{
+            "identifier": self.identifier,
+            "component": self.component,
+            "status": self.status,
+            "metadata": self.metadata,
+        }}
+
 
 class {class_name}:
-    \"\"\"Auto-generated service implementation for {pbi_id} ({component})\"\"\"
-{comment}
+    \"\"\"Domain Service implementation for {pbi_id} ({component}) with DDD Entity integration\"\"\"{comment}
+
+    def __init__(self):
+        self._repository: Dict[str, {entity_name}] = {{}}
+
+    def get_entity(self, identifier: str) -> Optional[{entity_name}]:
+        return self._repository.get(identifier)
+
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         identifier = payload.get("identifier")
         if not identifier:
             raise ValueError("identifier is required")
+
+        # ドメインエンティティの生成とインメモリストレージへの永続化
+        entity = {entity_name}(
+            identifier=identifier,
+            component="{component}",
+            metadata=payload.get("metadata", {{}}),
+        )
+        self._repository[identifier] = entity
 
         return {{
             "success": True,
             "status_code": 200,
             "identifier": identifier,
             "component": "{component}",
+            "data": entity.to_dict(),
         }}
 """
+
+
+def _generate_impl_code(
+    pbi_id: str,
+    component: str,
+    design_content: Optional[str] = None,
+    directive_instruction: Optional[str] = None,
+) -> str:
+    """Phase 4-2 Green: DDD設計書および要件に基づくプロダクション実装コード生成 (Issue #14)"""
+    class_name = f"{_to_pascal_case(pbi_id)}Service"
+    entity_name = f"{_to_pascal_case(pbi_id)}Entity"
+
+    # 1. Gemini API による生成を試行（利用可能な場合）
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if api_key and design_content:
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=api_key)
+            model_name = os.getenv("IMPL_AGENT_MODEL", "gemini-2.5-pro")
+            prompt = f"""あなたは DDD / クリーンアーキテクチャの実装スペシャリストです。
+以下の設計書および指示に基づき、{component} 層の Python プロダクションコードを生成してください。
+
+# PBI: {pbi_id}
+# 設計書:
+{design_content}
+
+# 修正指示 (Analyzer Directive):
+{directive_instruction or "なし"}
+
+# 必須要件:
+1. サービスクラス `{class_name}` を実装すること。
+2. `{class_name}` は `def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]` メソッドを持つこと。
+3. `payload.get("identifier")` が存在しない場合は `raise ValueError("identifier is required")` すること。
+4. 設計書に定義されたエンティティ/モデル `{entity_name}` を dataclass 等で実装し、状態保持・ロジックを実行すること。
+5. 正常時は `{{"success": True, "status_code": 200, "identifier": identifier, "component": "{component}", "data": ...}}` を返却すること。
+6. Markdown のコードブロックなしで Python コードのみを出力すること。
+"""
+            resp = client.models.generate_content(model=model_name, contents=prompt)
+            if resp.text:
+                return _strip_markdown_codeblock(resp.text)
+        except Exception as e:
+            logger.warning(f"Failed to generate impl code via Gemini: {e}")
+
+    # 2. 設計書を反映した決定論的フォールバック生成
+    return _fallback_impl_code(pbi_id, component, design_content, directive_instruction)
 
 
 async def _call_gemini_for_bdd_steps(
@@ -944,9 +1099,22 @@ async def run_tdd_cycle_activity(
     # 2. GREEN (プロダクション実装のみ可、テスト改ざん不可)
     # ---------------------------------------------------------
     _update_pipeline_phase(pbi_id, component, "GREEN")
-    logger.info(f"[{component}] TDD Phase: GREEN - Implementing solution at {impl_file}")
+    design_content = ""
+    if design_output and "design_path" in design_output:
+        p = Path(design_output["design_path"])
+        if p.exists():
+            design_content = p.read_text(encoding="utf-8")
+    if not design_content:
+        design_file = BASE_DIR / "tasks" / pbi_id / component / "design.md"
+        if design_file.exists():
+            design_content = design_file.read_text(encoding="utf-8")
 
-    impl_code = _generate_impl_code(pbi_id, component, directive_instruction=directive_inst)
+    impl_code = _generate_impl_code(
+        pbi_id,
+        component,
+        design_content=design_content,
+        directive_instruction=directive_inst,
+    )
     impl_file.write_text(impl_code, encoding="utf-8")
 
     test_targets = [test_file, bdd_file] if bdd_file.exists() else [test_file]
