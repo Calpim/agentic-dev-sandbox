@@ -214,6 +214,43 @@ async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) 
         return None
 
 
+def _inject_gherkin_tags(gherkin_content: str, tags: List[str]) -> str:
+    """
+    Gherkin コンテンツにタグを適切な位置に挿入する。
+    - '# language: ja' 等の言語ヘッダコメントが存在する場合、その直後に挿入して言語指定の有効性を保全する。
+    - '機能:' や 'Feature:' の直前、または既存のタグ行の手前に挿入する。
+    """
+    if not tags or not gherkin_content:
+        return gherkin_content
+
+    new_tags = [t if t.startswith("@") else f"@{t}" for t in tags]
+    tags_text = "\n".join(new_tags)
+
+    lines = gherkin_content.splitlines()
+
+    # 1. '# language:' 言語指定コメント行の探索
+    header_end_idx = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#") and "language:" in stripped:
+            header_end_idx = i + 1
+            break
+
+    # 2. 挿入候補位置の探索 (header_end_idx 以降で、既存タグまたは機能/Feature 行の手前)
+    insert_idx = header_end_idx
+    for i in range(header_end_idx, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("@") or stripped.startswith("機能:") or stripped.startswith("Feature:"):
+            insert_idx = i
+            break
+
+    result_lines = lines[:insert_idx] + [tags_text] + lines[insert_idx:]
+    result_text = "\n".join(result_lines)
+    if gherkin_content.endswith("\n"):
+        result_text += "\n"
+    return result_text
+
+
 @activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
     """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
@@ -249,10 +286,12 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
 
         if not coverage["is_covered"]:
             logger.warning(f"LLM generated specs missing coverage: {coverage}. Auto-completing missing tags.")
-            for bid in coverage["missing_app"]:
-                app_gherkin = f"@covers:{bid}\n" + app_gherkin
-            for bid in coverage["missing_bff"]:
-                bff_gherkin = f"@covers:{bid}\n" + bff_gherkin
+            if coverage.get("missing_app"):
+                app_gherkin = _inject_gherkin_tags(app_gherkin, [f"@covers:{bid}" for bid in coverage["missing_app"]])
+            if coverage.get("missing_bff"):
+                bff_gherkin = _inject_gherkin_tags(bff_gherkin, [f"@covers:{bid}" for bid in coverage["missing_bff"]])
+            if coverage.get("missing_biz"):
+                biz_gherkin = _inject_gherkin_tags(biz_gherkin, [f"@{bid}" for bid in coverage["missing_biz"]])
 
         biz_file = validate_safe_path(biz_dir, biz_dir / f"{pbi_id}.feature")
         app_file = validate_safe_path(app_dir, app_dir / f"{pbi_id}.feature")
