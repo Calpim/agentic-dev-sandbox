@@ -119,3 +119,27 @@ def test_rule_guard_cli_valid_input():
     data = json.loads(proc.stdout)
     assert data["category"] == ErrorCategory.SUCCESS.value
     assert data["next_action"] == NextAction.PROCEED.value
+
+
+def test_rule_guard_timeout_error():
+    res = classify_execution_output(
+        exit_code=-1, stdout="", stderr="TimeoutError: pytest execution timed out after 30.0 seconds"
+    )
+    assert res.category == ErrorCategory.TIMEOUT_ERROR
+    assert res.next_action == NextAction.ESCALATE_ANALYZER
+    assert "タイムアウト" in res.summary
+
+
+def test_rule_guard_collection_error():
+    stdout = "ERROR collecting tests/test_feature.py\nImportError: cannot import name 'UnknownService'"
+    res = classify_execution_output(exit_code=2, stdout=stdout)
+    assert res.category == ErrorCategory.COLLECTION_ERROR
+    assert res.next_action == NextAction.DIRECT_FIX
+    assert "テスト収集" in res.summary
+
+
+def test_rule_guard_module_not_found_error():
+    stdout = "ERROR collecting tests/test_feature.py\nModuleNotFoundError: No module named 'nonexistent_module'"
+    res = classify_execution_output(exit_code=2, stdout=stdout)
+    assert res.category == ErrorCategory.COLLECTION_ERROR
+    assert res.next_action == NextAction.DIRECT_FIX

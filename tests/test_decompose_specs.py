@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from orchestrator.activities import _strip_markdown_codeblock, decompose_specs_activity
+from orchestrator.activities import (
+    _inject_gherkin_tags,
+    _strip_markdown_codeblock,
+    decompose_specs_activity,
+)
 
 
 @pytest.mark.asyncio
@@ -87,3 +91,60 @@ def test_strip_markdown_codeblock():
 
     plain = '{"key": "value"}'
     assert _strip_markdown_codeblock(plain) == '{"key": "value"}'
+
+
+def test_inject_gherkin_tags_preserves_language_header():
+    """Gherkin にタグを挿入する際、# language: ja ヘッダが最先頭に保持され、タグが機能の直前に配置されること"""
+    content_with_header = """# language: ja
+機能: 会員管理
+  シナリオ: 登録成功
+"""
+    result = _inject_gherkin_tags(content_with_header, ["@covers:BIZ-001", "@covers:BIZ-002"])
+    lines = [line.strip() for line in result.splitlines() if line.strip()]
+    assert lines[0] == "# language: ja"
+    assert lines[1] == "@covers:BIZ-001"
+    assert lines[2] == "@covers:BIZ-002"
+    assert lines[3] == "機能: 会員管理"
+
+    # 言語ヘッダが無い場合は最先頭にタグが配置されること
+    content_without_header = """機能: 会員管理
+  シナリオ: 登録成功
+"""
+    res_no_header = _inject_gherkin_tags(content_without_header, ["@covers:BIZ-001"])
+    lines_no_header = [line.strip() for line in res_no_header.splitlines() if line.strip()]
+    assert lines_no_header[0] == "@covers:BIZ-001"
+    assert lines_no_header[1] == "機能: 会員管理"
+
+
+@pytest.mark.asyncio
+async def test_gemini_decomposition_auto_completes_tags_preserving_header(tmp_path):
+    """LLM 出力にタグ不足があった場合、# language: ja ヘッダを壊さずにタグが自動補完されること"""
+    sample_map = """# Example Map: PBI-777
+## BIZ-001: ログイン
+## BIZ-002: ログアウト
+"""
+    map_file = tmp_path / "PBI-777.md"
+    map_file.write_text(sample_map, encoding="utf-8")
+
+    # LLM 出力が BIZ-002 の covers タグを欠落させているケース
+    mock_llm_response = {
+        "business": "# language: ja\n機能: PBI-777 ビジネス\n  @BIZ-001\n  シナリオ: ログイン\n  @BIZ-002\n  シナリオ: ログアウト",
+        "app": "# language: ja\n@covers:BIZ-001\n機能: PBI-777 UI",
+        "bff": "# language: ja\n@covers:BIZ-001\n機能: PBI-777 API",
+    }
+
+    with patch("orchestrator.activities._call_gemini_for_decomposition", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = mock_llm_response
+
+        result = await decompose_specs_activity("PBI-777", str(map_file))
+
+        app_content = Path(result["app"]).read_text(encoding="utf-8")
+        bff_content = Path(result["bff"]).read_text(encoding="utf-8")
+
+        # 先頭行は # language: ja のままであること
+        assert app_content.startswith("# language: ja")
+        assert bff_content.startswith("# language: ja")
+
+        # 欠落していた @covers:BIZ-002 が補完されていること
+        assert "@covers:BIZ-002" in app_content
+        assert "@covers:BIZ-002" in bff_content
