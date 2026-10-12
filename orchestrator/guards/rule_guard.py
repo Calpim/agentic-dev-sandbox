@@ -9,6 +9,8 @@ from typing import Any, Dict
 class ErrorCategory(str, Enum):
     SUCCESS = "SUCCESS"
     SYNTAX_ERROR = "SYNTAX_ERROR"
+    COLLECTION_ERROR = "COLLECTION_ERROR"
+    TIMEOUT_ERROR = "TIMEOUT_ERROR"
     TYPE_ERROR = "TYPE_ERROR"
     LINT_ERROR = "LINT_ERROR"
     TEST_FAILURE = "TEST_FAILURE"
@@ -62,7 +64,18 @@ def classify_execution_output(
             max_retries=max_retries,
         )
 
-    # 2. 構文エラー (Syntax / Indentation / Parse error)
+    # 2. タイムアウト (終了コード -1 または TimeoutError 出力)
+    if exit_code == -1 or "TimeoutError" in combined_output or "pytest execution timed out" in combined_output:
+        return RuleGuardResult(
+            category=ErrorCategory.TIMEOUT_ERROR,
+            next_action=NextAction.ESCALATE_ANALYZER,
+            summary="テスト実行タイムアウト検知 (規定時間を超過しました)",
+            details=combined_output,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
+
+    # 3. 構文エラー (Syntax / Indentation / Parse error)
     syntax_patterns = [
         r"SyntaxError:\s*(.+)",
         r"IndentationError:\s*(.+)",
@@ -82,6 +95,25 @@ def classify_execution_output(
                 retry_count=retry_count,
                 max_retries=max_retries,
             )
+
+    # 4. テスト収集エラー (pytest collection error, exit code 2, ERROR collecting)
+    if (
+        exit_code == 2
+        or re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE)
+        or re.search(r"UsageError:\s*(.+)", combined_output, re.IGNORECASE)
+    ):
+        match = re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE) or re.search(
+            r"UsageError:\s*(.+)", combined_output, re.IGNORECASE
+        )
+        detail = match.group(0) if match else "pytest collection error (exit code 2)"
+        return RuleGuardResult(
+            category=ErrorCategory.COLLECTION_ERROR,
+            next_action=NextAction.DIRECT_FIX,
+            summary=f"テスト収集・実行前エラー検知: {detail}",
+            details=combined_output,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
 
     # 3. 型エラー (mypy, tsc, TypeError)
     type_patterns = [
@@ -126,11 +158,13 @@ def classify_execution_output(
                 max_retries=max_retries,
             )
 
-    # 5. テスト失敗 (pytest, jest, unittest, assertion error)
+    # 5. テスト失敗 (pytest, jest, unittest, assertion error, pytest.fail)
     test_failure_patterns = [
         r"FAILED\s+([^\s]+::[^\s]+)",
         r"AssertionError:\s*(.+)",
         r"AssertionError",
+        r"Failed:\s*(.+)",
+        r"NotImplementedError",
         r"\d+ failed,\s*\d+ passed",
         r"FAIL:\s*(.+)",
         r"Tests failed:",

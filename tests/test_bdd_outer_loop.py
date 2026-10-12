@@ -166,7 +166,6 @@ async def test_run_tdd_cycle_with_outer_bdd_loop_gemini_mock():
 from pathlib import Path
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
-from src.bff.{clean_id}_service import PbiBdd002Service
 
 FEATURE_FILE = Path(r"{(feat_file).as_posix()}")
 if FEATURE_FILE.exists():
@@ -178,8 +177,12 @@ def bdd_ctx():
 
 @when(parsers.re(r".*"))
 def when_req(bdd_ctx):
-    service = PbiBdd002Service()
-    bdd_ctx["res"] = service.execute({{"identifier": "{clean_id}-test"}})
+    try:
+        from src.bff.{clean_id}_service import PbiBdd002Service
+        service = PbiBdd002Service()
+        bdd_ctx["res"] = service.execute({{"identifier": "{clean_id}-test"}})
+    except (ImportError, ModuleNotFoundError):
+        pytest.fail("Service not implemented (expected in RED phase)")
 
 @then(parsers.re(r".*"))
 def then_check(bdd_ctx):

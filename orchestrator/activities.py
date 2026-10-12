@@ -19,6 +19,7 @@ from orchestrator.guards.analyzer import (
     analyze_failure,
 )
 from orchestrator.guards.rule_guard import (
+    ErrorCategory,
     NextAction,
     classify_execution_output,
 )
@@ -629,16 +630,24 @@ def _generate_test_code(pbi_id: str, component: str, directive_instruction: Opti
     class_name = f"{_to_pascal_case(pbi_id)}Service"
     comment = f"\n# Directive Applied: {directive_instruction}\n" if directive_instruction else ""
     return f"""import pytest
-from src.{component}.{clean_id}_service import {class_name}
 {comment}
+def _get_service():
+    try:
+        from src.{component}.{clean_id}_service import {class_name}
+        return {class_name}()
+    except (ImportError, ModuleNotFoundError):
+        pytest.fail("Service implementation not found (expected in RED phase)")
+
+
 def test_{clean_id}_success():
-    service = {class_name}()
+    service = _get_service()
     result = service.execute({{"identifier": "{clean_id}-test-01"}})
     assert result.get("success") is True
     assert result.get("status_code") == 200
 
+
 def test_{clean_id}_validation_error():
-    service = {class_name}()
+    service = _get_service()
     with pytest.raises(ValueError, match="identifier is required"):
         service.execute({{}})
 """
@@ -728,7 +737,6 @@ def _generate_bdd_step_code(pbi_id: str, component: str, directive_instruction: 
 {inst_comment}from pathlib import Path
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
-from src.{component}.{clean_id}_service import {service_class}
 
 FEATURE_FILE = Path(r"{feat_path_str}")
 
@@ -741,16 +749,24 @@ def bdd_context():
     return {{"service": None, "result": None, "identifier": "{clean_id}-bdd-001"}}
 
 
+def _get_bdd_service():
+    try:
+        from src.{component}.{clean_id}_service import {service_class}
+        return {service_class}()
+    except (ImportError, ModuleNotFoundError):
+        pytest.fail("BDD service implementation not found (expected in RED phase)")
+
+
 @given(parsers.re(r".*"))
 def bdd_given_step(bdd_context):
-    bdd_context["service"] = {service_class}()
+    bdd_context["service"] = _get_bdd_service()
 
 
 @when(parsers.re(r".*"))
 def bdd_when_step(bdd_context):
     service = bdd_context.get("service")
     if service is None:
-        service = {service_class}()
+        service = _get_bdd_service()
         bdd_context["service"] = service
     bdd_context["result"] = service.execute({{"identifier": bdd_context["identifier"]}})
 
@@ -792,11 +808,20 @@ async def _run_pytest_on_target(
         return ret_code, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
     except asyncio.TimeoutError:
         try:
-            proc.kill()
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True,
+                    check=False,
+                )
+            else:
+                proc.kill()
             await proc.wait()
         except Exception:
             pass
         return -1, "", f"TimeoutError: pytest execution timed out after {timeout} seconds"
+    except Exception as e:
+        return -2, "", f"SubprocessLaunchError: {str(e)}"
 
 
 @activity.defn
@@ -859,7 +884,7 @@ async def run_tdd_cycle_activity(
         elif bdd_file.exists():
             bdd_file.unlink()
 
-        # RED 検証: 実装がないためテストが確実に失敗することを確認 (非同期 & 厳格検証)
+        # RED 検証: 実装がないためテストが確実にアサーションで失敗することを確認 (Issue #12, #19)
         red_code, red_out, red_err = await _run_pytest_on_target(test_targets)
         logger.info(
             f"[{component}] Red phase check: exit_code={red_code} (Expect != 0: {'OK' if red_code != 0 else 'FAIL'})"
@@ -872,6 +897,35 @@ async def run_tdd_cycle_activity(
                 "component": component,
                 "error": "TDD RED phase violation: Tests passed unexpectedly without implementation. Tests must assert actual business logic.",
             }
+
+        # Issue #12: 構文エラー・収集エラー・タイムアウト・起動失敗では Red 成功とみなさず失敗とする
+        guard_red = classify_execution_output(exit_code=red_code, stdout=red_out, stderr=red_err)
+        if guard_red.category != ErrorCategory.TEST_FAILURE:
+            logger.error(
+                f"[{component}] TDD RED phase execution error: {guard_red.category.value} ({guard_red.summary})"
+            )
+            _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
+            return {
+                "tdd_status": "RED_PHASE_EXECUTION_ERROR",
+                "component": component,
+                "error": f"TDD RED phase error: Tests failed due to {guard_red.category.value} ({guard_red.summary}). Expected assertion failure.",
+                "rule_guard": guard_red.to_dict(),
+                "output": f"{red_out}\n{red_err}".strip(),
+            }
+
+        # Issue #12: 既存の回帰テストが存在する場合、それらがパスすることを確認
+        existing_test_files = [f for f in comp_test_dir.glob("test_*.py") if f not in test_targets and f.is_file()]
+        if existing_test_files:
+            exist_code, exist_out, exist_err = await _run_pytest_on_target(existing_test_files)
+            if exist_code != 0:
+                logger.error(f"[{component}] TDD RED phase regression failure: Existing tests broken.")
+                _update_pipeline_phase(pbi_id, component, "RED", "FAILED")
+                return {
+                    "tdd_status": "REGRESSION_FAILURE",
+                    "component": component,
+                    "error": "TDD RED phase regression failure: Existing tests failed when running regression check.",
+                    "output": f"{exist_out}\n{exist_err}".strip(),
+                }
 
     # ---------------------------------------------------------
     # 2. GREEN (プロダクション実装のみ可、テスト改ざん不可)
