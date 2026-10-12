@@ -96,9 +96,17 @@ def main():
         if not current_phase:
             respond("allow")
 
+        # ワークスペース外作業ファイル、scratch、tasks、docs、仕様書markdown、設定ファイル等はガード対象外
+        NON_PROD_PATTERN = re.compile(
+            r"(\.gemini[/\\]|scratch[/\\]|tasks[/\\]|docs[/\\]|\.agents[/\\]|\.git[/\\]|specs[/\\]example-maps[/\\]|specs[/\\]features[/\\]|\.md$|\.json$|\.ya?ml$|\.toml$|\.txt$|\.env)",
+            re.IGNORECASE,
+        )
+        if NON_PROD_PATTERN.search(norm_path):
+            respond("allow")
+
         is_test_file = bool(TEST_PATTERN.search(norm_path))
 
-        # Red フェーズ: テストのみ編集可能
+        # Red フェーズ: テストのみ編集可能 (プロダクションコードは禁止)
         if current_phase == "RED":
             if not is_test_file:
                 respond(

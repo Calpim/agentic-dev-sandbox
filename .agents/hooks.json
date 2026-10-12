@@ -1,4 +1,4 @@
-{
+﻿{
   "tdd-isolation": {
     "enabled": true,
     "PreToolUse": [
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -m orchestrator.guards.tdd_isolation",
+            "command": "python tdd_isolation_hook.py",
             "timeout": 10
           }
         ]
@@ -15,3 +15,4 @@
     ]
   }
 }
+

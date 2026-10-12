@@ -117,3 +117,40 @@ def test_empty_or_invalid_payload_safe_fallback():
     stdout, _ = proc.communicate("")
     res = json.loads(stdout.strip())
     assert res.get("decision") == "allow"
+
+
+def test_non_production_files_allowed_in_red_phase():
+    """REDフェーズでもscratchファイル、タスク計画書、ドキュメント等の非プロダクションファイルは許可される"""
+    env = {"TDD_PHASE": "RED"}
+    non_prod_files = [
+        r"C:\Users\cal7m\.gemini\antigravity\brain\test\scratch\script.py",
+        "tasks/PBI-101/app/plan.md",
+        "docs/PROGRESS.md",
+        ".agents/hooks.json",
+        "specs/example-maps/PBI-101.md",
+    ]
+    for npf in non_prod_files:
+        payload = make_payload("write_to_file", npf)
+        res = run_guard(payload, env)
+        assert res.get("decision") == "allow", f"Expected allow for {npf} in RED phase"
+
+
+def test_hook_execution_from_agents_directory():
+    """カレントディレクトリが .agents 配下であっても ModuleNotFoundError にならず正常終了すること (Issue #20)"""
+    agents_dir = Path(__file__).resolve().parent.parent / ".agents"
+    bridge_script = agents_dir / "tdd_isolation_hook.py"
+    if bridge_script.exists():
+        proc = subprocess.Popen(
+            [sys.executable, str(bridge_script)],
+            cwd=str(agents_dir),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        stdout, stderr = proc.communicate(json.dumps(make_payload("write_to_file", "tasks/plan.md")))
+        assert proc.returncode == 0, f"Hook failed with stderr: {stderr}"
+        res = json.loads(stdout.strip())
+        assert res.get("decision") == "allow"
+
