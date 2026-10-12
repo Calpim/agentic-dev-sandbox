@@ -153,4 +153,3 @@ def test_hook_execution_from_agents_directory():
         assert proc.returncode == 0, f"Hook failed with stderr: {stderr}"
         res = json.loads(stdout.strip())
         assert res.get("decision") == "allow"
-

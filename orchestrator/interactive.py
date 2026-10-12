@@ -23,6 +23,7 @@ from orchestrator.activities import (
     run_design_activity,
     run_tdd_cycle_activity,
 )
+from orchestrator.guards.validators import validate_pbi_id
 
 logger = logging.getLogger("orchestrator.interactive")
 console = Console()
@@ -90,7 +91,7 @@ class InteractiveWorkflowRunner:
         on_lightweight_hil: Optional[HilCallback] = None,
         on_progress: Optional[ProgressCallback] = None,
     ):
-        self.pbi_id = pbi_id
+        self.pbi_id = validate_pbi_id(pbi_id)
         self.pbi_content = pbi_content
         self.on_gate_1 = on_gate_1 or default_console_example_map_gate
         self.on_gate_2 = on_gate_2 or default_console_schema_gate
@@ -276,6 +277,7 @@ async def run_single_step(
     extra_args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Helper for executing single pipeline steps from scripts or agents."""
+    pbi_id = validate_pbi_id(pbi_id)
     extra_args = extra_args or {}
 
     if step_name == "example_map":

@@ -1,9 +1,10 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Bridge runner for Antigravity Lifecycle Hook (tdd-isolation)
 Ensures repo_root is in sys.path regardless of execution directory.
 """
+
 import json
 import runpy
 import sys
@@ -23,4 +24,3 @@ try:
         print(json.dumps({"decision": "allow", "reason": "tdd_isolation.py not found, allowing safely"}))
 except Exception as e:
     print(json.dumps({"decision": "allow", "reason": f"tdd_isolation_hook warning: {e}"}))
-

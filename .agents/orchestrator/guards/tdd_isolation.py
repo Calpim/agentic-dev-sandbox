@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import runpy
 import sys
@@ -13,5 +13,5 @@ if target.exists():
     runpy.run_path(str(target), run_name="__main__")
 else:
     import json
-    print(json.dumps({"decision": "allow"}))
 
+    print(json.dumps({"decision": "allow"}))

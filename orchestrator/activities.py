@@ -23,6 +23,7 @@ from orchestrator.guards.rule_guard import (
     NextAction,
     classify_execution_output,
 )
+from orchestrator.guards.validators import validate_pbi_id, validate_safe_path
 
 load_dotenv()
 logger = logging.getLogger("orchestrator.activities")
@@ -100,11 +101,12 @@ async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: 
 @activity.defn
 async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> str:
     """Phase 1-1: Example Map 生成 Activity (Gemini API 結合 & フィードバック反映)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Generating Example Map for {pbi_id} (feedback: {feedback})")
 
     target_dir = BASE_DIR / "specs" / "example-maps"
     _ensure_dir(target_dir)
-    target_file = target_dir / f"{pbi_id}.md"
+    target_file = validate_safe_path(target_dir, target_dir / f"{pbi_id}.md")
 
     # 1. 本物の LLM (Gemini API) 呼び出しを試行 (非同期)
     llm_output = await _call_gemini_for_example_map(pbi_id, pbi_content, feedback)
@@ -205,6 +207,7 @@ async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) 
 @activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
     """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Decomposing specs for {pbi_id} from {example_map_path}")
 
     biz_dir = BASE_DIR / "specs" / "features" / "business"
@@ -213,15 +216,16 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     for d in (biz_dir, app_dir, bff_dir):
         _ensure_dir(d)
 
-    example_map_content = Path(example_map_path).read_text(encoding="utf-8")
+    safe_example_map_path = validate_safe_path(BASE_DIR, example_map_path, allow_temp=True)
+    example_map_content = safe_example_map_path.read_text(encoding="utf-8")
 
     # 1. 本物の LLM (Gemini API) による仕様分解を試行
     llm_specs = await _call_gemini_for_decomposition(pbi_id, example_map_content)
     if llm_specs:
         logger.info("Successfully decomposed Gherkin specs via Gemini API!")
-        biz_file = biz_dir / f"{pbi_id}.feature"
-        app_file = app_dir / f"{pbi_id}.feature"
-        bff_file = bff_dir / f"{pbi_id}.feature"
+        biz_file = validate_safe_path(biz_dir, biz_dir / f"{pbi_id}.feature")
+        app_file = validate_safe_path(app_dir, app_dir / f"{pbi_id}.feature")
+        bff_file = validate_safe_path(bff_dir, bff_dir / f"{pbi_id}.feature")
 
         biz_file.write_text(llm_specs["business"], encoding="utf-8")
         app_file.write_text(llm_specs["app"], encoding="utf-8")
@@ -263,12 +267,12 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     covers_header = " ".join(covers_tags)
 
     # 1. ビジネス層 Gherkin
-    biz_file = biz_dir / f"{pbi_id}.feature"
+    biz_file = validate_safe_path(biz_dir, biz_dir / f"{pbi_id}.feature")
     biz_content = f"# language: ja\n機能: {pbi_id} ビジネス振る舞い定義\n\n" + "\n".join(biz_rules_gherkin)
     biz_file.write_text(biz_content, encoding="utf-8")
 
     # 2. App層 Gherkin
-    app_file = app_dir / f"{pbi_id}.feature"
+    app_file = validate_safe_path(app_dir, app_dir / f"{pbi_id}.feature")
     app_file.write_text(
         f"""# language: ja
 {covers_header}
@@ -282,7 +286,7 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
     )
 
     # 3. BFF層 Gherkin
-    bff_file = bff_dir / f"{pbi_id}.feature"
+    bff_file = validate_safe_path(bff_dir, bff_dir / f"{pbi_id}.feature")
     bff_file.write_text(
         f"""# language: ja
 {covers_header}
@@ -451,10 +455,11 @@ def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[st
 @activity.defn
 async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feedback: Optional[str] = None) -> str:
     """Phase 2-1: OpenAPI スキーマ ドラフト (Gemini API 結合 & 人間フィードバック反映)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Drafting OpenAPI schema for {pbi_id} (feedback: {feedback})")
     schema_dir = BASE_DIR / "specs" / "api" / "v1"
     _ensure_dir(schema_dir)
-    schema_file = schema_dir / f"{pbi_id}.yaml"
+    schema_file = validate_safe_path(schema_dir, schema_dir / f"{pbi_id}.yaml")
 
     bff_gherkin = ""
     biz_gherkin = ""
@@ -480,7 +485,8 @@ async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feed
 @activity.defn
 async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
     """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化"""
-    task_dir = BASE_DIR / "tasks" / pbi_id
+    pbi_id = validate_pbi_id(pbi_id)
+    task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
     _ensure_dir(task_dir / "app")
     _ensure_dir(task_dir / "bff")
 
@@ -519,7 +525,9 @@ async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
 
 def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS"):
     """tasks/{pbi_id}/state.json のパイプラインフェーズを更新する"""
-    state_file = BASE_DIR / "tasks" / pbi_id / "state.json"
+    pbi_id = validate_pbi_id(pbi_id)
+    task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
+    state_file = task_dir / "state.json"
     if state_file.exists():
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
@@ -597,11 +605,14 @@ def _fallback_design_doc(pbi_id: str, component: str, spec_content: str, feedbac
 @activity.defn
 async def run_design_activity(pbi_id: str, component: str, feedback: Optional[str] = None) -> Dict[str, Any]:
     """Phase 4-1: DDD / 設計フェーズ (Gemini API 結合)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Running Design activity for {pbi_id} / {component} (feedback={feedback})")
     _update_pipeline_phase(pbi_id, component, "DESIGN", "IN_PROGRESS")
 
-    spec_path = BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature"
-    schema_path = BASE_DIR / "specs" / "api" / "v1" / f"{pbi_id}.yaml"
+    spec_dir = BASE_DIR / "specs" / "features" / component
+    schema_dir = BASE_DIR / "specs" / "api" / "v1"
+    spec_path = validate_safe_path(spec_dir, spec_dir / f"{pbi_id}.feature")
+    schema_path = validate_safe_path(schema_dir, schema_dir / f"{pbi_id}.yaml")
     spec_content = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
     schema_content = schema_path.read_text(encoding="utf-8") if schema_path.exists() else ""
 
@@ -609,7 +620,8 @@ async def run_design_activity(pbi_id: str, component: str, feedback: Optional[st
     if not design_content:
         design_content = _fallback_design_doc(pbi_id, component, spec_content, feedback)
 
-    design_file = BASE_DIR / "tasks" / pbi_id / component / "design.md"
+    task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
+    design_file = validate_safe_path(task_dir, task_dir / component / "design.md")
     _ensure_dir(design_file.parent)
     design_file.write_text(design_content, encoding="utf-8")
 
@@ -832,6 +844,7 @@ async def run_tdd_cycle_activity(
     directive: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Phase 4-2 & 5: TDD サイクル (Red -> Green -> Refactor -> Verify with Rule Guard & Analyzer)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(
         f"Running TDD cycle for {pbi_id} / {component} (directive={directive.get('directive') if directive else None})"
     )
@@ -999,6 +1012,7 @@ async def run_tdd_cycle_activity(
 @activity.defn
 async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 5-3: Analyzer 根本原因分析 & Directive 策定 (ROADMAP P1-4 & WORKFLOW 5-3)"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Running Analyzer activity for {pbi_id} / {component}")
     _update_pipeline_phase(pbi_id, component, "ANALYZER", "IN_PROGRESS")
 
@@ -1008,9 +1022,11 @@ async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Di
 
     test_file = comp_test_dir / f"test_{clean_id}.py"
     impl_file = comp_src_dir / f"{clean_id}_service.py"
-    spec_file = BASE_DIR / "specs" / "features" / component / f"{pbi_id}.feature"
-    schema_file = BASE_DIR / "specs" / "api" / "v1" / f"{pbi_id}.yaml"
-    task_dir = BASE_DIR / "tasks" / pbi_id
+    spec_dir = BASE_DIR / "specs" / "features" / component
+    schema_dir = BASE_DIR / "specs" / "api" / "v1"
+    spec_file = validate_safe_path(spec_dir, spec_dir / f"{pbi_id}.feature")
+    schema_file = validate_safe_path(schema_dir, schema_dir / f"{pbi_id}.yaml")
+    task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
     state_file = task_dir / "state.json"
     plan_file = task_dir / component / "plan.md"
     audit_file = task_dir / "audit.jsonl"
@@ -1442,6 +1458,7 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
 @activity.defn
 async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_res: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6: 結合検証 (Integration Gate: 契約適合 + ビジネス Gherkin BDD) & Phase 7: GitHub PR 自動作成"""
+    pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Phase 6: Starting Integration Verification and PR creation for {pbi_id}")
     clean_id = _clean_id(pbi_id)
 
@@ -1485,7 +1502,7 @@ async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_
 
     # 4. PR サマリー生成 & tasks/ 保存
     pr_body = _build_pr_body(pbi_id, app_res, bff_res, integration_res)
-    pr_file = BASE_DIR / "tasks" / pbi_id / "PR_SUMMARY.md"
+    pr_file = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id / "PR_SUMMARY.md")
     _ensure_dir(pr_file.parent)
     pr_file.write_text(pr_body, encoding="utf-8")
 

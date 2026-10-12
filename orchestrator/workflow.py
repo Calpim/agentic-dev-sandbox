@@ -1,10 +1,12 @@
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+
+from orchestrator.guards.validators import validate_pbi_id
 
 # Activity 定義のインポート準備（名前ベースで呼ぶためインターフェースまたは文字列参照）
 
@@ -21,6 +23,16 @@ class WorkflowState:
     stage: str = "INIT"
     pr_url: Optional[str] = None
     pr_summary_path: Optional[str] = None
+    ignored_signals: List[str] = field(default_factory=list)
+
+
+def _safe_log_warning(msg: str) -> None:
+    try:
+        workflow.logger.warning(msg)
+    except Exception:
+        import logging
+
+        logging.getLogger("orchestrator.workflow").warning(msg)
 
 
 @workflow.defn
@@ -35,37 +47,67 @@ class PBIDevelopmentWorkflow:
 
     @workflow.signal
     def approve_example_map(self):
-        """人間ゲート 1: Example Map 承認"""
+        """人間ゲート 1: Example Map 承認 (Issue #18)"""
+        if self.state.stage not in ("WAITING_HUMAN_GATE_1_EXAMPLE_MAP", "RETRYING_EXAMPLE_MAP"):
+            msg = f"Ignored approve_example_map signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.example_map_approved = True
         self.state.example_map_feedback = None
 
     @workflow.signal
     def reject_example_map(self, feedback: str):
-        """人間ゲート 1: Example Map 修正依頼"""
+        """人間ゲート 1: Example Map 修正依頼 (Issue #18)"""
+        if self.state.stage not in ("WAITING_HUMAN_GATE_1_EXAMPLE_MAP", "RETRYING_EXAMPLE_MAP"):
+            msg = f"Ignored reject_example_map signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.example_map_approved = False
         self.state.example_map_feedback = feedback
 
     @workflow.signal
     def approve_schema(self):
-        """人間ゲート 2: OpenAPI スキーマ承認"""
+        """人間ゲート 2: OpenAPI スキーマ承認 (Issue #18)"""
+        if self.state.stage not in ("WAITING_HUMAN_GATE_2_SCHEMA", "RETRYING_SCHEMA"):
+            msg = f"Ignored approve_schema signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.schema_approved = True
         self.state.schema_feedback = None
 
     @workflow.signal
     def reject_schema(self, feedback: str):
-        """人間ゲート 2: スキーマ修正依頼"""
+        """人間ゲート 2: スキーマ修正依頼 (Issue #18)"""
+        if self.state.stage not in ("WAITING_HUMAN_GATE_2_SCHEMA", "RETRYING_SCHEMA"):
+            msg = f"Ignored reject_schema signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.schema_approved = False
         self.state.schema_feedback = feedback
 
     @workflow.signal
     def approve_schema_change(self, feedback: Optional[str] = None):
-        """軽量 HIL (P2-5): スキーマ変更差分の承認"""
+        """軽量 HIL (P2-5): スキーマ変更差分の承認 (Issue #18)"""
+        if self.state.stage != "WAITING_LIGHTWEIGHT_HIL_SCHEMA_CHANGE":
+            msg = f"Ignored approve_schema_change signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.schema_change_approved = True
         self.state.schema_change_feedback = feedback
 
     @workflow.signal
     def reject_schema_change(self, feedback: str):
-        """軽量 HIL (P2-5): スキーマ変更差分の却下"""
+        """軽量 HIL (P2-5): スキーマ変更差分の却下 (Issue #18)"""
+        if self.state.stage != "WAITING_LIGHTWEIGHT_HIL_SCHEMA_CHANGE":
+            msg = f"Ignored reject_schema_change signal at unexpected stage: {self.state.stage}"
+            _safe_log_warning(msg)
+            self.state.ignored_signals.append(msg)
+            return
         self.state.schema_change_approved = False
         self.state.schema_change_feedback = feedback
 
@@ -80,6 +122,7 @@ class PBIDevelopmentWorkflow:
             "schema_change_approved": self.state.schema_change_approved,
             "pr_url": self.state.pr_url,
             "pr_summary_path": self.state.pr_summary_path,
+            "ignored_signals": self.state.ignored_signals,
             "feedback": {
                 "example_map": self.state.example_map_feedback,
                 "schema": self.state.schema_feedback,
@@ -89,6 +132,7 @@ class PBIDevelopmentWorkflow:
 
     @workflow.run
     async def run(self, pbi_id: str, pbi_content: str) -> Dict[str, Any]:
+        pbi_id = validate_pbi_id(pbi_id)
         self.state.pbi_id = pbi_id
         self.state.stage = "PHASE_1_EXAMPLE_MAPPING"
 

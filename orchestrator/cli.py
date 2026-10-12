@@ -14,6 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 from temporalio.client import Client
 
+from orchestrator.guards.validators import validate_pbi_id
+
 app = typer.Typer(help="AI-Driven Autonomous Development CLI (Temporal Orchestrator)")
 console = Console()
 
@@ -36,6 +38,11 @@ def start(
     description: str = typer.Option("ユーザー登録およびバリデーション機能", help="PBIの概要・受け入れ条件"),
 ):
     """新しいPBI自律開発ワークフローを開始する"""
+    try:
+        pbi_id = validate_pbi_id(pbi_id)
+    except ValueError as e:
+        console.print(f"[bold red]入力エラー: {e}[/bold red]")
+        raise typer.BadParameter(str(e))
 
     async def _run():
         client = await get_client()
@@ -267,6 +274,12 @@ def run_interactive(
     description: str = typer.Option("ユーザー登録およびバリデーション機能", help="PBIの概要・受け入れ条件"),
 ):
     """Temporal サーバーなしで、ターミナル対話形式 (Gate 1, Gate 2, 軽量 HIL) で開発パイプラインを実行する"""
+    try:
+        pbi_id = validate_pbi_id(pbi_id)
+    except ValueError as e:
+        console.print(f"[bold red]入力エラー: {e}[/bold red]")
+        raise typer.BadParameter(str(e))
+
     from orchestrator.interactive import InteractiveWorkflowRunner
 
     async def _run():
