@@ -19,13 +19,22 @@ SCHEMA_PATTERN = re.compile(r"specs[/\\]api[/\\]")
 
 
 def get_current_phase(norm_path: str) -> str:
-    """tasks/**/state.json からコンポーネントに応じたTDDフェーズを特定する (環境変数はフォールバック)"""
+    """tasks/**/state.json からコンポーネントに応じたTDDフェーズを特定する (環境変数TDD_PHASE指定時は最優先)"""
+    # 1. 環境変数 TDD_PHASE が明示されている場合は最優先 (単体テスト / CLI指定)
+    if "TDD_PHASE" in os.environ:
+        return os.environ.get("TDD_PHASE", "").strip().upper()
+
     repo_root = Path(__file__).resolve().parent.parent.parent
     tasks_dir = repo_root / "tasks"
 
-    # 1. state.json からのコンポーネント別フェーズ特定 (Single Source of Truth)
+    # 2. state.json からのコンポーネント別フェーズ特定 (Single Source of Truth)
     if tasks_dir.exists():
-        for pbi_dir in tasks_dir.iterdir():
+        pbi_dirs = sorted(
+            [d for d in tasks_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        for pbi_dir in pbi_dirs:
             state_file = pbi_dir / "state.json"
             if state_file.is_file():
                 try:
@@ -50,11 +59,6 @@ def get_current_phase(norm_path: str) -> str:
                             return c_phase
                 except Exception:
                     pass
-
-    # 2. 単体テストやスタンドアローン実行用フォールバック (環境変数)
-    env_phase = os.environ.get("TDD_PHASE", "").strip().upper()
-    if env_phase:
-        return env_phase
 
     return ""
 

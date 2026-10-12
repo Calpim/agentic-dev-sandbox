@@ -3,6 +3,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
+import yaml
+
 PBI_ID_PATTERN = re.compile(r"^PBI-[A-Za-z0-9_-]+$")
 
 
@@ -106,5 +108,89 @@ def validate_gherkin_coverage(
             f"missing in app: {missing_app}, "
             f"missing in bff: {missing_bff}"
         )
+
+    return result
+
+
+def validate_openapi_spec(
+    schema_content: Union[str, Dict[str, Any]],
+    strict: bool = False,
+) -> Dict[str, Any]:
+    """
+    OpenAPI 3.0.3 仕様への適合性を検証する (Issue #17).
+    - openapi: '3.0.x' (3.0.0〜3.0.3)
+    - info: title, version (文字列)
+    - paths: dict であり、各パスが '/' で始まり、少なくとも1つの HTTP メソッドと responses を持つこと
+    strict=True の場合、検証失敗時に ValueError を発生させる (fail-closed)。
+    """
+    errors: List[str] = []
+
+    parsed: Dict[str, Any] = {}
+    if isinstance(schema_content, dict):
+        parsed = schema_content
+    elif isinstance(schema_content, str):
+        try:
+            loaded = yaml.safe_load(schema_content)
+            if not isinstance(loaded, dict):
+                errors.append("Schema root must be a YAML/JSON mapping object.")
+            else:
+                parsed = loaded
+        except Exception as e:
+            errors.append(f"Invalid YAML syntax: {e}")
+    else:
+        errors.append(f"Expected str or dict, got {type(schema_content)}")
+
+    if not errors:
+        # 1. openapi バージョン
+        openapi_ver = parsed.get("openapi")
+        if openapi_ver is None:
+            errors.append("Missing required 'openapi' version field.")
+        elif not str(openapi_ver).startswith("3.0."):
+            errors.append(f"Unsupported OpenAPI version '{openapi_ver}'. Expected '3.0.x' (e.g. 3.0.3).")
+
+        # 2. info オブジェクト
+        info = parsed.get("info")
+        if not info or not isinstance(info, dict):
+            errors.append("Missing or invalid 'info' object.")
+        else:
+            if not info.get("title") or not isinstance(info.get("title"), str):
+                errors.append("Missing required 'info.title' string.")
+            if not info.get("version") or not isinstance(info.get("version"), str):
+                errors.append("Missing required 'info.version' string.")
+
+        # 3. paths オブジェクト
+        paths = parsed.get("paths")
+        if paths is None or not isinstance(paths, dict):
+            errors.append("Missing or invalid 'paths' object.")
+        else:
+            if len(paths) == 0:
+                errors.append("'paths' object must contain at least one endpoint path.")
+            for path_key, path_item in paths.items():
+                if not isinstance(path_key, str) or not path_key.startswith("/"):
+                    errors.append(f"Endpoint path '{path_key}' must start with '/'.")
+                if not isinstance(path_item, dict):
+                    errors.append(f"Path item for '{path_key}' must be a mapping object.")
+                    continue
+                valid_methods = {"get", "post", "put", "delete", "patch", "options", "head", "trace"}
+                operations = {k.lower(): v for k, v in path_item.items() if k.lower() in valid_methods}
+                if not operations:
+                    errors.append(f"Path '{path_key}' does not define any HTTP method operation.")
+                for method, op in operations.items():
+                    if not isinstance(op, dict):
+                        errors.append(f"Operation '{method.upper()} {path_key}' must be an object.")
+                        continue
+                    responses = op.get("responses")
+                    if not responses or not isinstance(responses, dict):
+                        errors.append(f"Operation '{method.upper()} {path_key}' must define a 'responses' object.")
+
+    is_valid = len(errors) == 0
+    result = {
+        "is_valid": is_valid,
+        "errors": errors,
+        "schema": parsed if is_valid else None,
+    }
+
+    if strict and not is_valid:
+        raise ValueError(f"OpenAPI specification validation failed (fail-closed): {'; '.join(errors)}")
 
     return result

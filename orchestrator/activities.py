@@ -23,8 +23,13 @@ from orchestrator.guards.rule_guard import (
     NextAction,
     classify_execution_output,
 )
+from orchestrator.guards.task_state import (
+    update_pipeline_phase_atomic,
+    update_task_state,
+)
 from orchestrator.guards.validators import (
     validate_gherkin_coverage,
+    validate_openapi_spec,
     validate_pbi_id,
     validate_safe_path,
 )
@@ -527,36 +532,40 @@ async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feed
     # 1. 本物の LLM (Gemini API) による OpenAPI 生成を試行
     llm_schema = await _call_gemini_for_openapi(pbi_id, bff_gherkin, biz_gherkin, feedback)
     if llm_schema:
-        logger.info("Successfully generated OpenAPI schema via Gemini API!")
-        schema_file.write_text(llm_schema, encoding="utf-8")
-        return str(schema_file)
+        try:
+            validate_openapi_spec(llm_schema, strict=True)
+            logger.info("Successfully validated and generated OpenAPI schema via Gemini API!")
+            schema_file.write_text(llm_schema, encoding="utf-8")
+            return str(schema_file)
+        except ValueError as e:
+            logger.warning(f"LLM generated schema failed OpenAPI 3.0.3 validation: {e}. Falling back to template.")
 
-    # 2. フォールバック生成
+    # 2. フォールバック生成 (Issue #17: 仕様適合性を厳格検証)
     logger.info("Drafting OpenAPI schema via fallback template...")
     fallback_content = _fallback_draft_openapi(pbi_id, bff_gherkin, feedback)
+    validate_openapi_spec(fallback_content, strict=True)
     schema_file.write_text(fallback_content, encoding="utf-8")
     return str(schema_file)
 
 
 @activity.defn
 async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
-    """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化"""
+    """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化 (Issue #15: アトミック排他制御)"""
     pbi_id = validate_pbi_id(pbi_id)
     task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
     _ensure_dir(task_dir / "app")
     _ensure_dir(task_dir / "bff")
 
-    # state.json (オーケストレーター専用)
-    state_file = task_dir / "state.json"
-    state_data = {
-        "pbi": pbi_id,
-        "schema_path": schema_path,
-        "pipelines": {
+    # state.json (アトミック排他初期化)
+    def _init_state(data: Dict[str, Any]) -> None:
+        data["pbi"] = pbi_id
+        data["schema_path"] = schema_path
+        data["pipelines"] = {
             "app": {"phase": "INIT", "status": "PLANNED"},
             "bff": {"phase": "INIT", "status": "PLANNED"},
-        },
-    }
-    state_file.write_text(json.dumps(state_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        }
+
+    update_task_state(pbi_id, BASE_DIR, _init_state)
 
     # plan.md (App & BFF)
     for comp in ("app", "bff"):
@@ -580,19 +589,8 @@ async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
 
 
 def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS"):
-    """tasks/{pbi_id}/state.json のパイプラインフェーズを更新する"""
-    pbi_id = validate_pbi_id(pbi_id)
-    task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
-    state_file = task_dir / "state.json"
-    if state_file.exists():
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
-            if component in data.get("pipelines", {}):
-                data["pipelines"][component]["phase"] = phase
-                data["pipelines"][component]["status"] = status
-                state_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception as e:
-            logger.warning(f"Failed to update state.json: {e}")
+    """tasks/{pbi_id}/state.json のパイプラインフェーズをアトミックに排他更新する (Issue #15)"""
+    update_pipeline_phase_atomic(pbi_id, BASE_DIR, component, phase, status)
 
 
 async def _call_gemini_for_design(
