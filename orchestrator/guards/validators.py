@@ -58,7 +58,7 @@ def validate_safe_path(
 
 def extract_biz_ids_from_example_map(example_map_content: str) -> List[str]:
     """Example Map コンテンツから BIZ-xxx 識別子を重複なく出現順で抽出する (Issue #13)"""
-    matches = re.findall(r"##\s+(BIZ-\d+)", example_map_content)
+    matches = re.findall(r"##\s+(BIZ-\d+)\b", example_map_content)
     seen = set()
     result = []
     for m in matches:
@@ -86,9 +86,9 @@ def validate_gherkin_coverage(
     if not biz_ids:
         biz_ids = ["BIZ-001", "BIZ-002"]
 
-    missing_biz = [bid for bid in biz_ids if f"@{bid}" not in biz_gherkin]
-    missing_app = [bid for bid in biz_ids if f"@covers:{bid}" not in app_gherkin]
-    missing_bff = [bid for bid in biz_ids if f"@covers:{bid}" not in bff_gherkin]
+    missing_biz = [bid for bid in biz_ids if not re.search(rf"@{bid}\b", biz_gherkin)]
+    missing_app = [bid for bid in biz_ids if not re.search(rf"@covers:{bid}\b", app_gherkin)]
+    missing_bff = [bid for bid in biz_ids if not re.search(rf"@covers:{bid}\b", bff_gherkin)]
 
     is_covered = len(missing_biz) == 0 and len(missing_app) == 0 and len(missing_bff) == 0
 
@@ -118,7 +118,7 @@ def validate_openapi_spec(
 ) -> Dict[str, Any]:
     """
     OpenAPI 3.0.3 仕様への適合性を検証する (Issue #17).
-    - openapi: '3.0.x' (3.0.0〜3.0.3)
+    - openapi: '3.0.0' 〜 '3.0.3' (厳格ホワイトリスト)
     - info: title, version (文字列)
     - paths: dict であり、各パスが '/' で始まり、少なくとも1つの HTTP メソッドと responses を持つこと
     strict=True の場合、検証失敗時に ValueError を発生させる (fail-closed)。
@@ -141,12 +141,14 @@ def validate_openapi_spec(
         errors.append(f"Expected str or dict, got {type(schema_content)}")
 
     if not errors:
-        # 1. openapi バージョン
+        # 1. openapi バージョン (3.0.0 〜 3.0.3 のみ許可)
         openapi_ver = parsed.get("openapi")
         if openapi_ver is None:
             errors.append("Missing required 'openapi' version field.")
-        elif not str(openapi_ver).startswith("3.0."):
-            errors.append(f"Unsupported OpenAPI version '{openapi_ver}'. Expected '3.0.x' (e.g. 3.0.3).")
+        elif not re.match(r"^3\.0\.[0-3]$", str(openapi_ver).strip()):
+            errors.append(
+                f"Unsupported OpenAPI version '{openapi_ver}'. Expected '3.0.0', '3.0.1', '3.0.2', or '3.0.3'."
+            )
 
         # 2. info オブジェクト
         info = parsed.get("info")

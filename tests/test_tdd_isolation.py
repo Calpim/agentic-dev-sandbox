@@ -126,13 +126,65 @@ def test_non_production_files_allowed_in_red_phase():
         r"C:\Users\cal7m\.gemini\antigravity\brain\test\scratch\script.py",
         "tasks/PBI-101/app/plan.md",
         "docs/PROGRESS.md",
-        ".agents/hooks.json",
         "specs/example-maps/PBI-101.md",
     ]
     for npf in non_prod_files:
         payload = make_payload("write_to_file", npf)
         res = run_guard(payload, env)
         assert res.get("decision") == "allow", f"Expected allow for {npf} in RED phase"
+
+
+def test_tdd_guard_protects_guard_files_and_state_json():
+    """ガード設定ファイル、ガードスクリプト、state.json はフェーズ問わず常に直接編集禁止"""
+    protected_files = [
+        ".agents/hooks.json",
+        ".agents/tdd_isolation_hook.py",
+        "orchestrator/guards/tdd_isolation.py",
+        "tasks/PBI-101/state.json",
+    ]
+    for pf in protected_files:
+        payload = make_payload("write_to_file", pf)
+        for phase in ["", "RED", "GREEN", "REFACTOR"]:
+            res = run_guard(payload, {"TDD_PHASE": phase})
+            assert res.get("decision") == "deny", f"Expected deny for protected {pf} in {phase}"
+            assert "保護ファイル" in res.get("reason", "")
+
+    # app/tasks/worker.py は tasks を含んでもプロダクションコードなので RED 中は deny
+    prod_payload = make_payload("write_to_file", "src/app/tasks/worker.py")
+    res = run_guard(prod_payload, {"TDD_PHASE": "RED"})
+    assert res.get("decision") == "deny"
+
+
+def test_hooks_json_valid_json_without_bom():
+    """hooks.json が UTF-8 (BOMなし) で正しくパースできること"""
+    hooks_file = Path(__file__).resolve().parent.parent / ".agents" / "hooks.json"
+    assert hooks_file.exists()
+    content_bytes = hooks_file.read_bytes()
+    assert not content_bytes.startswith(b"\xef\xbb\xbf"), "BOM detected in hooks.json"
+    data = json.loads(content_bytes.decode("utf-8"))
+    assert "tdd-isolation" in data
+
+
+def test_tdd_hook_fail_closed_on_error():
+    """フックスクリプトが異常終了または例外時に fail-closed (deny) となること"""
+    agents_dir = Path(__file__).resolve().parent.parent / ".agents"
+    bridge_script = agents_dir / "tdd_isolation_hook.py"
+    if bridge_script.exists():
+        # 不正な JSON を渡した場合
+        proc = subprocess.Popen(
+            [sys.executable, str(bridge_script)],
+            cwd=str(agents_dir),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        stdout, stderr = proc.communicate("INVALID_JSON")
+        assert proc.returncode == 0
+        res = json.loads(stdout.strip())
+        assert res.get("decision") == "deny"
+        assert "fail-closed" in res.get("reason", "").lower()
 
 
 def test_hook_execution_from_agents_directory():

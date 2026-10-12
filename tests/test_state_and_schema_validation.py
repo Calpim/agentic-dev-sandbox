@@ -1,3 +1,4 @@
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -6,6 +7,9 @@ import pytest
 
 from orchestrator.activities import draft_schema_activity
 from orchestrator.guards.task_state import (
+    _acquire_os_lock,
+    _release_os_lock,
+    file_lock,
     get_task_state,
     update_pipeline_phase_atomic,
     update_task_state,
@@ -160,3 +164,71 @@ paths:
         res = validate_openapi_spec(content, strict=True)
         assert res["is_valid"] is True
         assert f"/api/v1/{pbi_id.lower()}" in res["schema"]["paths"]
+
+
+def test_openapi_version_strict_3_0_0_to_3_0_3():
+    """OpenAPI バージョンは 3.0.0 〜 3.0.3 のホワイトリストのみ許可され、3.0.4 や 3.0.99 は拒否されること"""
+    template = """openapi: {ver}
+info: {{title: Test, version: '1.0'}}
+paths:
+  /test:
+    get:
+      responses: {{'200': {{description: ok}}}}
+"""
+    # 許可されるバージョン
+    for ver in ["3.0.0", "3.0.1", "3.0.2", "3.0.3"]:
+        res = validate_openapi_spec(template.format(ver=ver), strict=True)
+        assert res["is_valid"] is True
+
+    # 拒否されるバージョン
+    for bad_ver in ["3.0.4", "3.0.99", "3.0.foo", "3.1.0", "4.0.0"]:
+        res = validate_openapi_spec(template.format(ver=bad_ver), strict=False)
+        assert res["is_valid"] is False
+        assert any("Unsupported OpenAPI version" in e for e in res["errors"])
+
+
+def test_file_lock_concurrent_exclusion(tmp_path: Path):
+    """OSレベル排他ロックが正しく機能し、保持中は他者が獲得できず解放後に獲得可能となること"""
+    lock_file = tmp_path / "test.lock"
+
+    # 1. 単体での獲得と解放
+    with file_lock(lock_file, timeout=1.0):
+        assert lock_file.exists()
+
+    # 2. 保持中に別 FD からロック獲得を試みると排他制御されること
+    fd1 = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
+    if os.lseek(fd1, 0, os.SEEK_END) == 0:
+        os.write(fd1, b"\0")
+    os.lseek(fd1, 0, os.SEEK_SET)
+
+    assert _acquire_os_lock(fd1) is True
+
+    # fd1 がロックを保持している間、file_lock はタイムアウトで失敗する
+    with pytest.raises(TimeoutError, match="Could not acquire OS file lock"):
+        with file_lock(lock_file, timeout=0.2, poll_interval=0.02):
+            pass
+
+    # fd1 を解放
+    _release_os_lock(fd1)
+    os.close(fd1)
+
+    # fd1 解放後は file_lock が正常に獲得できること
+    with file_lock(lock_file, timeout=1.0):
+        pass
+
+
+def test_state_json_corruption_preserves_data(tmp_path: Path):
+    """state.json が破損している場合、空データで上書きせず ValueError を発生させて元データを保全すること"""
+    pbi_id = "PBI-CORRUPT-01"
+    task_dir = tmp_path / "tasks" / pbi_id
+    task_dir.mkdir(parents=True)
+    state_file = task_dir / "state.json"
+    corrupt_content = "{ this is invalid json content !!"
+    state_file.write_text(corrupt_content, encoding="utf-8")
+
+    # update_task_state は上書きせず ValueError
+    with pytest.raises(ValueError, match="is corrupted"):
+        update_task_state(pbi_id, tmp_path, lambda d: d.update({"foo": "bar"}))
+
+    # 元データが破損・上書きされずに保全されていること
+    assert state_file.read_text(encoding="utf-8") == corrupt_content

@@ -147,3 +147,34 @@ PBI-103 のユーザー情報登録サービス設計。
     # 異常系 (必須バリデーション)
     with pytest.raises(ValueError, match="identifier is required"):
         service.execute({})
+
+
+def test_gherkin_coverage_exact_tag_boundary():
+    """タグ照合が部分一致ではなく単語境界完全一致で行われること (BIZ-1 と BIZ-10 の誤認防止)"""
+    sample_map = """# Example Map: PBI-101
+## BIZ-1: 正常入力
+"""
+    # Gherkin 側に @BIZ-10 や @covers:BIZ-10 しかない場合
+    biz_gherkin = """# language: ja
+機能: PBI-101
+  @BIZ-10
+  シナリオ: 10
+"""
+    app_gherkin = """# language: ja
+@covers:BIZ-10
+機能: PBI-101 UI
+"""
+    bff_gherkin = """# language: ja
+@covers:BIZ-10
+機能: PBI-101 API
+"""
+    # BIZ-1 は網羅されていないため missing として検出されなければならない
+    res = validate_gherkin_coverage(sample_map, biz_gherkin, app_gherkin, bff_gherkin, strict=False)
+    assert res["is_covered"] is False
+    assert "BIZ-1" in res["missing_biz"]
+    assert "BIZ-1" in res["missing_app"]
+    assert "BIZ-1" in res["missing_bff"]
+
+    # strict=True 時は ValueError
+    with pytest.raises(ValueError, match="coverage validation failed"):
+        validate_gherkin_coverage(sample_map, biz_gherkin, app_gherkin, bff_gherkin, strict=True)

@@ -48,7 +48,7 @@ class PBIDevelopmentWorkflow:
     @workflow.signal
     def approve_example_map(self):
         """人間ゲート 1: Example Map 承認 (Issue #18)"""
-        if self.state.stage not in ("WAITING_HUMAN_GATE_1_EXAMPLE_MAP", "RETRYING_EXAMPLE_MAP"):
+        if self.state.stage != "WAITING_HUMAN_GATE_1_EXAMPLE_MAP":
             msg = f"Ignored approve_example_map signal at unexpected stage: {self.state.stage}"
             _safe_log_warning(msg)
             self.state.ignored_signals.append(msg)
@@ -59,7 +59,7 @@ class PBIDevelopmentWorkflow:
     @workflow.signal
     def reject_example_map(self, feedback: str):
         """人間ゲート 1: Example Map 修正依頼 (Issue #18)"""
-        if self.state.stage not in ("WAITING_HUMAN_GATE_1_EXAMPLE_MAP", "RETRYING_EXAMPLE_MAP"):
+        if self.state.stage != "WAITING_HUMAN_GATE_1_EXAMPLE_MAP":
             msg = f"Ignored reject_example_map signal at unexpected stage: {self.state.stage}"
             _safe_log_warning(msg)
             self.state.ignored_signals.append(msg)
@@ -70,7 +70,7 @@ class PBIDevelopmentWorkflow:
     @workflow.signal
     def approve_schema(self):
         """人間ゲート 2: OpenAPI スキーマ承認 (Issue #18)"""
-        if self.state.stage not in ("WAITING_HUMAN_GATE_2_SCHEMA", "RETRYING_SCHEMA"):
+        if self.state.stage != "WAITING_HUMAN_GATE_2_SCHEMA":
             msg = f"Ignored approve_schema signal at unexpected stage: {self.state.stage}"
             _safe_log_warning(msg)
             self.state.ignored_signals.append(msg)
@@ -81,7 +81,7 @@ class PBIDevelopmentWorkflow:
     @workflow.signal
     def reject_schema(self, feedback: str):
         """人間ゲート 2: スキーマ修正依頼 (Issue #18)"""
-        if self.state.stage not in ("WAITING_HUMAN_GATE_2_SCHEMA", "RETRYING_SCHEMA"):
+        if self.state.stage != "WAITING_HUMAN_GATE_2_SCHEMA":
             msg = f"Ignored reject_schema signal at unexpected stage: {self.state.stage}"
             _safe_log_warning(msg)
             self.state.ignored_signals.append(msg)
@@ -132,7 +132,13 @@ class PBIDevelopmentWorkflow:
 
     @workflow.run
     async def run(self, pbi_id: str, pbi_content: str) -> Dict[str, Any]:
-        pbi_id = validate_pbi_id(pbi_id)
+        try:
+            pbi_id = validate_pbi_id(pbi_id)
+        except ValueError as e:
+            from temporalio.exceptions import ApplicationError
+
+            raise ApplicationError(str(e), non_retryable=True)
+
         self.state.pbi_id = pbi_id
         self.state.stage = "PHASE_1_EXAMPLE_MAPPING"
 
@@ -162,8 +168,9 @@ class PBIDevelopmentWorkflow:
             )
 
             if self.state.example_map_feedback:
-                # 差し戻し時の再生成ループ
+                # 差し戻し時の再生成ループ: 承認フラグを安全にリセット
                 self.state.stage = "RETRYING_EXAMPLE_MAP"
+                self.state.example_map_approved = False
                 continue
 
         # ---------------------------------------------------------
@@ -200,6 +207,7 @@ class PBIDevelopmentWorkflow:
 
             if self.state.schema_feedback:
                 self.state.stage = "RETRYING_SCHEMA"
+                self.state.schema_approved = False
                 continue
 
         # Phase 2-2: モック生成 & 状態初期化

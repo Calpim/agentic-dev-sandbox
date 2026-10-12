@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import urllib.error
@@ -696,24 +697,18 @@ def _generate_test_code(pbi_id: str, component: str, directive_instruction: Opti
     class_name = f"{_to_pascal_case(pbi_id)}Service"
     comment = f"\n# Directive Applied: {directive_instruction}\n" if directive_instruction else ""
     return f"""import pytest
+from src.{component}.{clean_id}_service import {class_name}
 {comment}
-def _get_service():
-    try:
-        from src.{component}.{clean_id}_service import {class_name}
-        return {class_name}()
-    except (ImportError, ModuleNotFoundError):
-        pytest.fail("Service implementation not found (expected in RED phase)")
-
 
 def test_{clean_id}_success():
-    service = _get_service()
+    service = {class_name}()
     result = service.execute({{"identifier": "{clean_id}-test-01"}})
     assert result.get("success") is True
     assert result.get("status_code") == 200
 
 
 def test_{clean_id}_validation_error():
-    service = _get_service()
+    service = {class_name}()
     with pytest.raises(ValueError, match="identifier is required"):
         service.execute({{}})
 """
@@ -794,19 +789,21 @@ class {class_name}:
 """
 
 
-def _generate_impl_code(
+async def _call_gemini_for_impl(
     pbi_id: str,
     component: str,
     design_content: Optional[str] = None,
     directive_instruction: Optional[str] = None,
-) -> str:
-    """Phase 4-2 Green: DDD設計書および要件に基づくプロダクション実装コード生成 (Issue #14)"""
+) -> Optional[str]:
+    """Gemini API を利用して DDD 実装コードを非同期に生成する (asyncio.to_thread 委任)"""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key or not design_content:
+        return None
+
     class_name = f"{_to_pascal_case(pbi_id)}Service"
     entity_name = f"{_to_pascal_case(pbi_id)}Entity"
 
-    # 1. Gemini API による生成を試行（利用可能な場合）
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if api_key and design_content:
+    def _call_gemini_sync() -> Optional[str]:
         try:
             from google import genai
 
@@ -835,8 +832,18 @@ def _generate_impl_code(
                 return _strip_markdown_codeblock(resp.text)
         except Exception as e:
             logger.warning(f"Failed to generate impl code via Gemini: {e}")
+        return None
 
-    # 2. 設計書を反映した決定論的フォールバック生成
+    return await asyncio.to_thread(_call_gemini_sync)
+
+
+def _generate_impl_code(
+    pbi_id: str,
+    component: str,
+    design_content: Optional[str] = None,
+    directive_instruction: Optional[str] = None,
+) -> str:
+    """Phase 4-2 Green: DDD設計書および要件に基づくプロダクション実装コード生成 (Issue #14)"""
     return _fallback_impl_code(pbi_id, component, design_content, directive_instruction)
 
 
@@ -960,6 +967,10 @@ async def _run_pytest_on_target(
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{BASE_DIR}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(BASE_DIR)
 
+    exec_kwargs: Dict[str, Any] = {}
+    if sys.platform != "win32":
+        exec_kwargs["start_new_session"] = True
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -967,6 +978,7 @@ async def _run_pytest_on_target(
             stderr=asyncio.subprocess.PIPE,
             cwd=str(BASE_DIR),
             env=env,
+            **exec_kwargs,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         ret_code = proc.returncode if proc.returncode is not None else 1
@@ -980,7 +992,10 @@ async def _run_pytest_on_target(
                     check=False,
                 )
             else:
-                proc.kill()
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
             await proc.wait()
         except Exception:
             pass
@@ -1027,8 +1042,16 @@ async def run_tdd_cycle_activity(
         _update_pipeline_phase(pbi_id, component, "RED")
         logger.info(f"[{component}] TDD Phase: RED - Creating failing tests (inner unit & outer BDD)")
 
-        if impl_file.exists():
-            impl_file.unlink()
+        # RED フェーズ: ロジック未実装の空スタブを配置し、真のアサーション失敗を検証可能にする
+        stub_code = f"""# TDD RED Phase Stub for {pbi_id}
+class {_to_pascal_case(pbi_id)}Service:
+    \"\"\"Initial stub without business logic for RED phase.\"\"\"
+
+    def execute(self, payload: dict) -> dict:
+        # ロジック未実装のため空レスポンスを返却し、アサーションを失敗させる
+        return {{}}
+"""
+        impl_file.write_text(stub_code, encoding="utf-8")
 
         # 1-a. 内側ループ: ユニットテスト生成
         test_code = _generate_test_code(pbi_id, component, directive_instruction=directive_inst)
@@ -1107,12 +1130,19 @@ async def run_tdd_cycle_activity(
         if design_file.exists():
             design_content = design_file.read_text(encoding="utf-8")
 
-    impl_code = _generate_impl_code(
+    impl_code = await _call_gemini_for_impl(
         pbi_id,
         component,
         design_content=design_content,
         directive_instruction=directive_inst,
     )
+    if not impl_code:
+        impl_code = _generate_impl_code(
+            pbi_id,
+            component,
+            design_content=design_content,
+            directive_instruction=directive_inst,
+        )
     impl_file.write_text(impl_code, encoding="utf-8")
 
     test_targets = [test_file, bdd_file] if bdd_file.exists() else [test_file]

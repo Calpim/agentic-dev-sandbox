@@ -101,3 +101,22 @@ async def test_red_phase_rejects_regression_failure():
             result = await run_tdd_cycle_activity(pbi_id, component, design_output)
             assert result.get("tdd_status") == "REGRESSION_FAILURE"
             assert "REGRESSION_FAILURE" in result.get("tdd_status", "")
+
+
+@pytest.mark.asyncio
+async def test_red_phase_rejects_import_error_in_test_execution():
+    """実行時に ImportError が発生した場合、偽の Red 成功とせず RED_PHASE_EXECUTION_ERROR とすること"""
+    pbi_id = "PBI-RED-005"
+    component = "app"
+    design_output = {"design_status": "COMPLETED"}
+
+    import_err_out = (
+        1,
+        "FAILED tests/test_pbi_red_005.py::test_foo\nImportError: cannot import name 'PbiRed005Service'",
+        "",
+    )
+    with patch("orchestrator.activities._run_pytest_on_target", new_callable=AsyncMock) as mock_pytest:
+        mock_pytest.return_value = import_err_out
+        result = await run_tdd_cycle_activity(pbi_id, component, design_output)
+        assert result.get("tdd_status") == "RED_PHASE_EXECUTION_ERROR"
+        assert "COLLECTION_ERROR" in result.get("error", "")

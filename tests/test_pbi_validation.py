@@ -95,3 +95,30 @@ def test_workflow_signal_stage_guard():
     assert wf.state.schema_change_approved is True
     assert wf.state.schema_change_feedback == "looks good"
     assert len(wf.state.ignored_signals) == 5  # unchanged
+
+
+def test_workflow_signals_rejected_during_retrying_stage():
+    """RETRYING_* ステージ中はいかなる承認シグナルも受領せず無視されること (Issue #18)"""
+    wf = PBIDevelopmentWorkflow()
+
+    wf.state.stage = "RETRYING_EXAMPLE_MAP"
+    wf.approve_example_map()
+    assert wf.state.example_map_approved is False
+    assert len(wf.state.ignored_signals) == 1
+    assert "RETRYING_EXAMPLE_MAP" in wf.state.ignored_signals[0]
+
+    wf.state.stage = "RETRYING_SCHEMA"
+    wf.approve_schema()
+    assert wf.state.schema_approved is False
+    assert len(wf.state.ignored_signals) == 2
+    assert "RETRYING_SCHEMA" in wf.state.ignored_signals[1]
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_invalid_pbi_id():
+    """無効な PBI ID が渡された場合、ApplicationError (non-retryable) が送出されること"""
+    from temporalio.exceptions import ApplicationError
+
+    wf = PBIDevelopmentWorkflow()
+    with pytest.raises(ApplicationError, match="Invalid PBI ID"):
+        await wf.run("invalid-id", "content")

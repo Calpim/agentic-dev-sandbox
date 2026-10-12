@@ -64,8 +64,14 @@ def classify_execution_output(
             max_retries=max_retries,
         )
 
-    # 2. タイムアウト (終了コード -1 または TimeoutError 出力)
-    if exit_code == -1 or "TimeoutError" in combined_output or "pytest execution timed out" in combined_output:
+    # 2. タイムアウト (終了コード -1 / 124 / 137 または明確なタイムアウト出力)
+    is_timeout = (
+        exit_code in (-1, 124, 137)
+        or "pytest execution timed out" in combined_output
+        or bool(re.search(r"timed out after \d+ (?:seconds|s)", combined_output, re.IGNORECASE))
+        or bool(re.search(r"Failed:\s*Timeout >", combined_output))
+    )
+    if is_timeout:
         return RuleGuardResult(
             category=ErrorCategory.TIMEOUT_ERROR,
             next_action=NextAction.ESCALATE_ANALYZER,
@@ -96,14 +102,18 @@ def classify_execution_output(
                 max_retries=max_retries,
             )
 
-    # 4. テスト収集エラー (pytest collection error, exit code 2, ERROR collecting)
-    if (
-        exit_code == 2
-        or re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE)
-        or re.search(r"UsageError:\s*(.+)", combined_output, re.IGNORECASE)
-    ):
-        match = re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE) or re.search(
-            r"UsageError:\s*(.+)", combined_output, re.IGNORECASE
+    # 4. テスト収集エラー / モジュール未解決エラー (pytest collection error, ModuleNotFoundError, ImportError)
+    is_collection_error = (
+        bool(re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE))
+        or bool(re.search(r"UsageError:\s*(.+)", combined_output, re.IGNORECASE))
+        or bool(re.search(r"(?:ModuleNotFoundError|ImportError):\s*(.+)", combined_output))
+        or (exit_code == 2 and ("pytest" in combined_output.lower() or "collecting" in combined_output.lower()))
+    )
+    if is_collection_error:
+        match = (
+            re.search(r"ERROR collecting\s+(.+)", combined_output, re.IGNORECASE)
+            or re.search(r"UsageError:\s*(.+)", combined_output, re.IGNORECASE)
+            or re.search(r"(?:ModuleNotFoundError|ImportError):\s*(.+)", combined_output)
         )
         detail = match.group(0) if match else "pytest collection error (exit code 2)"
         return RuleGuardResult(
