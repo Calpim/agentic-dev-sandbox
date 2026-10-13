@@ -44,9 +44,9 @@
           </button>
         </div>
 
-        <button onclick="copyFeedback()" class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1.5 transition-all">
+        <button onclick="copyFeedback()" class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1.5 transition-all" title="選択した回答内容をコピーしてチャットに貼り付けられます">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
-          レビュー回答をコピー
+          📋 回答のみをコピー
         </button>
       </div>
     </header>
@@ -94,7 +94,7 @@
         </div>
       </div>
       <p class="text-xs text-[var(--muted-foreground,#94a3b8)] mb-4">
-        仕様の不確実性・エッジケースについて人間が確定してください。回答内容はコピーしてチャットに反映できます。
+        仕様の不確実性・エッジケースについて人間が確定してください。回答を選択して下のボタンを押すと、チャット貼り付け用テキストがコピーされます。
       </p>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -119,26 +119,45 @@
       <!-- {{GHERKIN_CODE_BLOCK}} -->
     </div>
 
-    <!-- Review Footer -->
-    <footer class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div>
-        <h4 class="text-sm font-bold text-[var(--foreground,#f8fafc)]">Gate 1 レビュー意思決定</h4>
-        <p class="text-xs text-[var(--muted-foreground,#94a3b8)]">質問への回答を確認・選択の上、承認または修正指示を送信してください</p>
+    <!-- Review Submission / Approval Footer -->
+    <footer class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border,#334155)]">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 font-mono">レビュー手順</span>
+            <h4 class="text-sm font-bold text-[var(--foreground,#f8fafc)]">レビュー結果をクリップボードにコピーしてチャットへ送信</h4>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground,#94a3b8)] mt-1">
+            上の質問の回答を選んだら、下のボタンを押してテキストをコピーし、チャット欄または承認モーダルに <kbd class="px-1.5 py-0.5 rounded bg-[var(--background,#0f172a)] border border-[var(--border,#334155)] font-mono text-[10px]">Ctrl+V</kbd> で貼り付けてください。
+          </p>
+        </div>
+        <div class="flex-shrink-0 text-right hidden sm:block">
+          <span class="text-[11px] text-amber-400 font-medium">※チャット側の承認ボタンを押すと次フェーズへ進みます</span>
+        </div>
       </div>
-      <div class="flex items-center gap-3 w-full sm:w-auto">
-        <button onclick="requestChanges()" class="flex-1 sm:flex-none px-4 py-2 text-xs font-semibold rounded-xl border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors">
-          ✏️ 修正・差し戻し指示
-        </button>
-        <button onclick="approveGate1()" class="flex-1 sm:flex-none px-5 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-400 hover:to-emerald-400 text-white shadow-md transition-all">
-          ✅ 承認して Phase 2 へ進む
-        </button>
+
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+        <div class="text-xs text-[var(--muted-foreground,#94a3b8)] flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-sky-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <span>ボタンを押すと回答＋判定文がクリップボードに入ります</span>
+        </div>
+        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+          <button onclick="requestChanges()" class="flex-1 sm:flex-none px-4 py-2 text-xs font-semibold rounded-xl border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+            <span>📋 修正指示テキストをコピー</span>
+          </button>
+          <button onclick="approveGate1()" class="flex-1 sm:flex-none px-5 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-400 hover:to-emerald-400 text-white shadow-md transition-all flex items-center justify-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+            <span>📋 承認テキストをコピー（チャット貼付用）</span>
+          </button>
+        </div>
       </div>
     </footer>
 
     <!-- Toast -->
-    <div id="toast" class="fixed bottom-6 right-6 hidden bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl items-center gap-2 transition-all">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-      <span id="toastMsg">回答をコピーしました</span>
+    <div id="toast" class="fixed bottom-6 right-6 hidden bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl items-center gap-2 transition-all z-50">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+      <span id="toastMsg">回答内容をクリップボードにコピーしました！チャットに Ctrl+V で貼り付けてください</span>
     </div>
 
   </div>
@@ -181,11 +200,10 @@
       setTimeout(() => {
         toast.classList.add('hidden');
         toast.classList.remove('flex');
-      }, 3500);
+      }, 4500);
     }
 
     function getFeedbackPayload() {
-      // 質問入力値の集約
       let result = `【Gate 1: Example Mapping レビュー回答】\n`;
       const inputs = document.querySelectorAll('[id^="ans-q"]');
       inputs.forEach(el => {
@@ -196,19 +214,19 @@
 
     function copyFeedback() {
       navigator.clipboard.writeText(getFeedbackPayload()).then(() => {
-        showToast('質問への回答テキストをコピーしました！チャットに貼り付け可能です');
+        showToast('📋 Q&A回答をコピーしました！チャット欄に Ctrl+V で貼り付けてください');
       });
     }
 
     function approveGate1() {
       navigator.clipboard.writeText(getFeedbackPayload() + `\n判定: 承認（Phase 2: OpenAPI 設計へ進む）`).then(() => {
-        showToast('承認ステータスと回答をコピーしました。チャットで送信してください');
+        showToast('📋 承認テキストをコピーしました！チャット欄または承認モーダルに Ctrl+V で貼り付けてください');
       });
     }
 
     function requestChanges() {
-      navigator.clipboard.writeText(getFeedbackPayload() + `\n判定: 修正指示あり（詳細をチャットでお知らせください）`).then(() => {
-        showToast('差し戻し指示テキストをコピーしました');
+      navigator.clipboard.writeText(getFeedbackPayload() + `\n判定: 修正指示あり（修正内容を追記してチャットへ送信してください）`).then(() => {
+        showToast('📋 修正指示テキストをコピーしました！チャット欄に Ctrl+V で貼り付けてください');
       });
     }
   </script>
