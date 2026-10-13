@@ -4,9 +4,9 @@ Provides clean, safe, and thread-safe APIs to manage task states, plans,
 and directives without requiring Temporal or an external database.
 """
 
-from datetime import datetime, timezone
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -84,9 +84,7 @@ class StateManager:
         valid_id = validate_pbi_id(pbi_id)
         return get_task_state(valid_id, self.base_dir)
 
-    def set_component_phase(
-        self, pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS"
-    ) -> None:
+    def set_component_phase(self, pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS") -> None:
         """Update phase of a component (app / bff) atomically."""
         valid_id = validate_pbi_id(pbi_id)
         update_pipeline_phase_atomic(valid_id, self.base_dir, component, phase, status)
@@ -115,9 +113,11 @@ class StateManager:
 
         new_lines = []
         in_directive = False
+        directive_found = False
         for line in lines:
             if line.strip().startswith("## Current Directive"):
                 in_directive = True
+                directive_found = True
                 new_lines.append(line)
                 new_lines.append(f"- **Directive**: `{directive}`")
                 if reason:
@@ -129,6 +129,15 @@ class StateManager:
                 in_directive = False
             if not in_directive:
                 new_lines.append(line)
+
+        if not directive_found:
+            new_lines.append("")
+            new_lines.append("## Current Directive")
+            new_lines.append(f"- **Directive**: `{directive}`")
+            if reason:
+                new_lines.append(f"- **Reason**: {reason}")
+            if instruction:
+                new_lines.append(f"- **Instruction**: {instruction}")
 
         plan_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         self.append_audit_log(

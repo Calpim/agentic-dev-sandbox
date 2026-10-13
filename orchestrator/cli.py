@@ -5,8 +5,6 @@ task states without requiring Temporal Server or external daemons.
 """
 
 import asyncio
-import os
-from pathlib import Path
 import sys
 from typing import Optional
 
@@ -15,10 +13,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-import typer
 
 from orchestrator.guards.validators import validate_pbi_id
 from orchestrator.state_manager import StateManager
