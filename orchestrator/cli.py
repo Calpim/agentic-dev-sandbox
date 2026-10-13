@@ -1,10 +1,9 @@
 """AI-Driven Autonomous Development CLI (v4.0 Agent-Native).
 
-Provides command-line utilities to run interactive pipelines and inspect
-task states without requiring Temporal Server or external daemons.
+Provides command-line utilities to inspect and manage task states without
+requiring Temporal Server or external daemons.
 """
 
-import asyncio
 import sys
 from typing import Optional
 
@@ -27,43 +26,6 @@ state_manager = StateManager()
 
 
 @app.command()
-def run_interactive(
-    pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
-    description: str = typer.Option("ユーザー登録およびバリデーション機能", help="PBIの概要・受け入れ条件"),
-):
-    """ターミナル対話形式 (Gate 1, Gate 2, 軽量 HIL) で開発パイプラインを実行する"""
-    try:
-        pbi_id = validate_pbi_id(pbi_id)
-    except ValueError as e:
-        console.print(f"[bold red]入力エラー: {e}[/bold red]")
-        raise typer.BadParameter(str(e))
-
-    from orchestrator.interactive import InteractiveWorkflowRunner
-
-    async def _run():
-        runner = InteractiveWorkflowRunner(pbi_id=pbi_id, pbi_content=description)
-        try:
-            result = await runner.run()
-        except KeyboardInterrupt:
-            console.print("\n[yellow]ユーザー操作によりワークフローが中断されました。[/yellow]")
-            return
-
-        if result.get("status") == "COMPLETED":
-            console.print(
-                Panel(
-                    f"[bold green]ワークフローが完了しました！[/bold green]\n"
-                    f"PR URL: [cyan]{result.get('pr_url')}[/cyan]\n"
-                    f"PR Summary: [cyan]{result.get('pr_summary_path')}[/cyan]",
-                    title="Workflow Completed",
-                )
-            )
-        else:
-            console.print(f"[bold red]ワークフローが終了しました (Status: {result.get('status')})[/bold red]")
-
-    asyncio.run(_run())
-
-
-@app.command()
 def init(
     pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
     schema_path: Optional[str] = typer.Option(None, "--schema", "-s", help="OpenAPI スキーマファイルのパス"),
@@ -75,13 +37,40 @@ def init(
         console.print(f"[bold red]入力エラー: {e}[/bold red]")
         raise typer.BadParameter(str(e))
 
-    task_dir = state_manager.init_pbi(pbi_id, schema_path=schema_path)
+    try:
+        task_dir = state_manager.init_pbi(pbi_id, schema_path=schema_path)
+    except FileExistsError as e:
+        console.print(f"[bold yellow]タスクは初期化済みです。既存状態を保持しました: {pbi_id}[/bold yellow]")
+        raise typer.BadParameter(str(e))
     console.print(
         Panel(
             f"[bold green]PBI タスクを初期化しました: {pbi_id}[/bold green]\n"
             f"Task Directory: [cyan]{task_dir}[/cyan]\n"
             f"State File: [cyan]{task_dir / 'state.json'}[/cyan]",
             title="Task Initialized",
+        )
+    )
+
+
+@app.command()
+def reset(
+    pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
+    schema_path: Optional[str] = typer.Option(None, "--schema", "-s", help="OpenAPI スキーマファイルのパス"),
+):
+    """state.json と plan.md を初期化する。audit/spec/実装ファイルは保持する。"""
+    try:
+        pbi_id = validate_pbi_id(pbi_id)
+    except ValueError as e:
+        console.print(f"[bold red]入力エラー: {e}[/bold red]")
+        raise typer.BadParameter(str(e))
+
+    task_dir = state_manager.reset_pbi(pbi_id, schema_path=schema_path)
+    console.print(
+        Panel(
+            f"[bold yellow]タスク状態と plan をリセットしました: {pbi_id}[/bold yellow]\n"
+            "監査ログ、仕様ファイル、実装ファイルは保持しています。\n"
+            f"Task Directory: [cyan]{task_dir}[/cyan]",
+            title="Task Reset",
         )
     )
 

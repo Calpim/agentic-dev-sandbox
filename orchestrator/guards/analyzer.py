@@ -160,8 +160,10 @@ async def analyze_failure(
     test_file_path: str = "",
     impl_file_path: str = "",
 ) -> AnalyzerDirective:
-    """
-    失敗ログ、関連コード、仕様、設計情報を読み込み、根本原因を分析して Directive を策定する。
+    """Deprecated: legacy Gemini failure analyzer; use the Analyzer subagent instead.
+
+    This helper analyzes test output and related code/specification to select a
+    recovery directive. It remains for legacy callers and tests.
     """
     logger.info(f"Analyzer triggered for {pbi_id} ({component}), cycle={cycle_count}/{max_cycles}")
 

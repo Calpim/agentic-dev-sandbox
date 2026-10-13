@@ -95,13 +95,7 @@ Antigravity チャット上で以下のように入力するだけで、対話�
 PBI-101 ユーザー新規登録機能を作って
 ```
 
-#### 方法 B: ターミナル対話 CLI で実行
-ターミナル上で Gate 1, Gate 2, 軽量 HIL を対話的に進めることも可能です：
-```bash
-python orchestrator/cli.py run-interactive PBI-101 --description "ユーザー新規登録機能"
-```
-
-#### 方法 C: タスク状態の手動管理・確認
+#### 方法 B: タスク状態の手動管理・確認
 ```bash
 # タスクの初期化 (tasks/PBI-101/ 配下を作成)
 python orchestrator/cli.py init PBI-101
@@ -111,4 +105,9 @@ python orchestrator/cli.py status PBI-101
 
 # Directive (指示) の配信
 python orchestrator/cli.py directive PBI-101 app FIX_TEST -r "アサーション誤り" -i "ステータスコードを400に修正"
+
+# state.json と plan.md のみを明示的にリセット (audit/spec/実装は保持)
+python orchestrator/cli.py reset PBI-101
 ```
+
+自動開発ワークフローは Antigravity チャットから `workflow-runner` スキルを使って起動してください。CLI はタスク状態の管理専用です。旧 `orchestrator.interactive` / `orchestrator.activities` は互換性と既存テストのため残していますが、v4.0 では非推奨で、Gemini ベースの旧実行経路です。

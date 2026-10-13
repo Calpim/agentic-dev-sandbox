@@ -1,8 +1,8 @@
-"""Interactive Workflow Runner for Standalone and Antigravity Chat Execution.
+"""Deprecated standalone Gemini-backed workflow runner.
 
-This module allows running the AI-driven development pipeline without requiring an external
-Temporal daemon, supporting interactive human gates (Gate 1 Example Map, Gate 2 Schema,
-Lightweight HIL Schema Change / RESYNC) via callbacks or terminal prompts.
+This module remains for legacy callers and tests only. It is not part of the
+supported v4.0 execution path. Start autonomous work through the
+``workflow-runner`` skill, which coordinates native subagents and human gates.
 """
 
 import asyncio
@@ -80,7 +80,7 @@ async def default_console_hil_gate(directive: Dict[str, Any]) -> Tuple[bool, Opt
 
 
 class InteractiveWorkflowRunner:
-    """End-to-end interactive runner for PBI development workflow."""
+    """Deprecated legacy runner; use the ``workflow-runner`` skill instead."""
 
     def __init__(
         self,
@@ -276,7 +276,7 @@ async def run_single_step(
     feedback: Optional[str] = None,
     extra_args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Helper for executing single pipeline steps from scripts or agents."""
+    """Deprecated legacy helper; use native subagents and StateManager instead."""
     pbi_id = validate_pbi_id(pbi_id)
     extra_args = extra_args or {}
 

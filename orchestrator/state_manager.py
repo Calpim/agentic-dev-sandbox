@@ -36,34 +36,50 @@ class StateManager:
         return task_dir
 
     def init_pbi(self, pbi_id: str, schema_path: Optional[str] = None) -> Path:
-        """Initialize tasks/{pbi_id}/ directory, state.json, and component plan.md files."""
+        """Create a task only when it has not already been initialized."""
         valid_id = validate_pbi_id(pbi_id)
         task_dir = self.get_task_dir(valid_id)
         resolved_schema = schema_path or str(self.base_dir / "specs" / "api" / "v1" / f"{valid_id}.yaml")
 
-        (task_dir / "app").mkdir(parents=True, exist_ok=True)
-        (task_dir / "bff").mkdir(parents=True, exist_ok=True)
+        update_task_state(
+            valid_id,
+            self.base_dir,
+            lambda data: self._initialize_state(data, valid_id, resolved_schema),
+            create_only=True,
+        )
+        self._write_initial_plans(task_dir, valid_id, resolved_schema)
+        self.append_audit_log(valid_id, "PBI_INITIALIZED", {"schema_path": resolved_schema})
+        return task_dir
 
-        def _init_data(data: Dict[str, Any]) -> None:
-            data["pbi"] = valid_id
-            data["schema_path"] = resolved_schema
-            data["stage"] = "INITIALIZED"
-            data["pipelines"] = {
-                "app": {"phase": "INIT", "status": "PLANNED"},
-                "bff": {"phase": "INIT", "status": "PLANNED"},
+    @staticmethod
+    def _initialize_state(data: Dict[str, Any], pbi_id: str, schema_path: str) -> None:
+        data.update(
+            {
+                "pbi": pbi_id,
+                "schema_path": schema_path,
+                "stage": "INITIALIZED",
+                "pipelines": {
+                    "app": {"phase": "INIT", "status": "PLANNED"},
+                    "bff": {"phase": "INIT", "status": "PLANNED"},
+                },
             }
+        )
 
-        update_task_state(valid_id, self.base_dir, _init_data)
+    def _write_initial_plans(self, task_dir: Path, pbi_id: str, schema_path: str) -> None:
+        for component in ("app", "bff"):
+            component_dir = task_dir / component
+            component_dir.mkdir(parents=True, exist_ok=True)
+            (component_dir / "plan.md").write_text(
+                self._plan_content(pbi_id, component, schema_path), encoding="utf-8"
+            )
 
-        # Initialize plan.md for app and bff
-        for comp in ("app", "bff"):
-            plan_file = task_dir / comp / "plan.md"
-            if not plan_file.exists():
-                content = f"""# Execution Plan: {valid_id} ({comp.upper()})
+    @staticmethod
+    def _plan_content(pbi_id: str, component: str, schema_path: str) -> str:
+        return f"""# Execution Plan: {pbi_id} ({component.upper()})
 
 ## 前提リソース
-- Schema: `{resolved_schema}`
-- Spec: `specs/features/{comp}/{valid_id}.feature`
+- Schema: `{schema_path}`
+- Spec: `specs/features/{component}/{pbi_id}.feature`
 
 ## 進捗
 - [x] Phase 1 & 2: 仕様・設計承認
@@ -75,9 +91,20 @@ class StateManager:
 ## Current Directive
 - 初期化完了。設計フェーズに着手してください。
 """
-                plan_file.write_text(content, encoding="utf-8")
 
-        self.append_audit_log(valid_id, "PBI_INITIALIZED", {"schema_path": resolved_schema})
+    def reset_pbi(self, pbi_id: str, schema_path: Optional[str] = None) -> Path:
+        """Reset task state and plans while preserving audit, specs, and implementation files."""
+        valid_id = validate_pbi_id(pbi_id)
+        task_dir = self.get_task_dir(valid_id)
+        resolved_schema = schema_path or str(self.base_dir / "specs" / "api" / "v1" / f"{valid_id}.yaml")
+
+        def _reset_data(data: Dict[str, Any]) -> None:
+            data.clear()
+            self._initialize_state(data, valid_id, resolved_schema)
+
+        update_task_state(valid_id, self.base_dir, _reset_data)
+        self._write_initial_plans(task_dir, valid_id, resolved_schema)
+        self.append_audit_log(valid_id, "PBI_RESET", {"schema_path": resolved_schema})
         return task_dir
 
     def get_state(self, pbi_id: str) -> Dict[str, Any]:

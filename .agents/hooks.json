@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python tdd_isolation_hook.py",
+            "command": "python .agents/tdd_isolation_hook.py",
             "timeout": 10
           }
         ]
