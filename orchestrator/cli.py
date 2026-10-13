@@ -5,20 +5,26 @@ requiring Temporal Server or external daemons.
 """
 
 import sys
+from pathlib import Path
 from typing import Optional
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from orchestrator.guards.validators import validate_pbi_id
-from orchestrator.state_manager import StateManager
+# Ensure repository root is on sys.path when invoked directly as a script
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+from orchestrator.guards.validators import validate_pbi_id  # noqa: E402
+from orchestrator.state_manager import StateManager  # noqa: E402
 
 app = typer.Typer(help="AI-Driven Autonomous Development CLI (v4.0 Agent-Native)")
 console = Console()
@@ -105,6 +111,33 @@ def status(
         )
 
     console.print(table)
+
+@app.command()
+def phase(
+    pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
+    component: str = typer.Argument(..., help="対象コンポーネント (app または bff)"),
+    phase_name: str = typer.Argument(..., help="フェーズ名 (例: DESIGN, RED, GREEN, REFACTOR, DONE)"),
+    status: str = typer.Option("IN_PROGRESS", "--status", help="ステータス (例: IN_PROGRESS, COMPLETED)"),
+):
+    """コンポーネント (app / bff) の開発フェーズ (state.json) を更新する"""
+    try:
+        pbi_id = validate_pbi_id(pbi_id)
+    except ValueError as e:
+        console.print(f"[bold red]入力エラー: {e}[/bold red]")
+        raise typer.BadParameter(str(e))
+
+    comp_norm = component.lower()
+    if comp_norm not in ("app", "bff"):
+        console.print(f"[bold red]無効なコンポーネントです: {component} (app または bff を指定してください)[/bold red]")
+        sys.exit(1)
+
+    state_manager.set_component_phase(
+        pbi_id=pbi_id,
+        component=comp_norm,
+        phase=phase_name.upper(),
+        status=status,
+    )
+    console.print(f"[bold green]フェーズを更新しました: {pbi_id} ({comp_norm}) -> {phase_name.upper()} ({status})[/bold green]")
 
 
 @app.command()

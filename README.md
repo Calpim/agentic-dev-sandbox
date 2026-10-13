@@ -103,6 +103,9 @@ python orchestrator/cli.py init PBI-101
 # 進捗ステータスの確認
 python orchestrator/cli.py status PBI-101
 
+# フェーズの更新 (DESIGN, RED, GREEN, REFACTOR, DONE)
+python orchestrator/cli.py phase PBI-101 app RED
+
 # Directive (指示) の配信
 python orchestrator/cli.py directive PBI-101 app FIX_TEST -r "アサーション誤り" -i "ステータスコードを400に修正"
 

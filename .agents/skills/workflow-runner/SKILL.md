@@ -102,8 +102,9 @@ flowchart TD
 
 1. **タスク状態の初期化**:
    - `tasks/{pbi_id}/state.json` がある場合は現在の state と plan を読み、既存の作業を再開する。`init_pbi` で既存状態を上書きしない。
-   - 未初期化の場合のみ `python -c "from orchestrator.state_manager import StateManager; StateManager().init_pbi('{pbi_id}')"` を実行して state と component plan を作成する。
+   - 未初期化の場合のみ `python orchestrator/cli.py init '{pbi_id}'` を実行して state と component plan を作成する。
    - リセットはユーザーから明示的に依頼された場合のみ `python orchestrator/cli.py reset '{pbi_id}'` で行う。この操作は state と plan を初期化し、audit、仕様、実装ファイルは保持する。
+   - 各サブエージェントはフェーズ進行時に `python orchestrator/cli.py phase '{pbi_id}' {component} {phase}` を実行して TDD ガードと足並みを揃える。
 2. **`invoke_subagent` で App Agent と BFF Agent を【2つの新規 Conversation】として並行起動する**：
    ```json
    [

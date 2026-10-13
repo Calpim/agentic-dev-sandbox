@@ -16,19 +16,23 @@ BFF 層（API エンドポイント、リクエスト/レスポンス変換、�
 
 1. **設計フェーズ (DESIGN)**:
    - ルーター、コントローラー、バリデーションスキーマ、クライアントアダプターを設計。
+   - フェーズ宣言: `python orchestrator/cli.py phase {PBI_ID} bff DESIGN`
    - `tasks/{PBI_ID}/bff/plan.md` の進捗を更新。
 
 2. **Red フェーズ (RED)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} bff RED`
    - **編集可能範囲**: `src/bff/tests/` のテストコードのみ（プロダクションコード `src/bff/` の編集は絶対禁止）。
    - OpenAPI スキーマ契約および Gherkin シナリオに適合する API テストを作成。
    - `pytest src/bff/tests/` を実行し、**テストが失敗 (Red) すること** を確認。
 
 3. **Green フェーズ (GREEN)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} bff GREEN`
    - **編集可能範囲**: `src/bff/` のプロダクションコードのみ（テストコードの編集は絶対禁止）。
    - エンドポイント実装（FastAPI など）およびハンドラーを実装。
    - `pytest src/bff/tests/` を実行し、**すべてのテストが成功 (Green) すること** を確認。
 
 4. **リファクタリングフェーズ (REFACTOR)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} bff REFACTOR`
    - エラーハンドリングの共通化、型安全性の向上。テストが引き続き Green であることを検証。
 
 ---
