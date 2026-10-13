@@ -1,15 +1,16 @@
-# AI-Driven Autonomous Development Workflow (v3.0)
+# AI-Driven Autonomous Development Workflow (v4.0 Agent-Native)
 〜 Example Mapping × BDD × DDD × TDD によるマルチエージェント協調開発パイプライン 〜
 
-> v2.0 からの主な変更点
-> - 人間のレビュー対象を **Gherkin → Example Map** に変更（Gherkin は機械用成果物）
-> - **Guard（機械的強制）と Skill（判断の指針）を分離**。強制はhooks / CI / スクリプトで実装
-> - 状態とカウンタは **決定論的オーケストレーター** が保持（`state.json`）。`plan.md` はビュー
-> - **テスト誤りルート**（Red への差し戻し）、**Phase 6 の失敗ルート**、**スキーマ変更の同期** を追加
-> - **初版スキーマの人間承認ゲート** を追加
-> - Gherkin を **受け入れテストとして実行**（二重ループ TDD）
-> - **Jev（軽量トリアージ層）を廃止**し、実装エージェントの自己リトライに置き換え
-> - モデル名ではなく **ロール名** で定義（Fable → Analyzer）
+> [!NOTE]
+> **v4.0 (Current: Agent-Native) への進化と v3.0 (Deprecated) の変更点**
+> - **【Deprecated】Temporal オーケストレーターの廃止 ➔ ファイル駆動型 StateManager へ一本化**:
+>   - *旧仕様 (v3.0)*: Temporal Server（Docker / DB / 常駐 Worker）による耐久ワークフロー。管理コストとリソース消費が過大だった。
+>   - *現行 (v4.0)*: `tasks/{PBI}/state.json` および `orchestrator/state_manager.py` による軽量なファイル駆動型プロトコルへ移行。外部デーモン不要で動作。
+> - **【Deprecated】Gemini API (`google.genai`) 直接呼出の撤廃 ➔ Antigravity Subagent（独立 Conversation）協調へ**:
+>   - *旧仕様 (v3.0)*: Python スクリプトが Gemini API を直接呼び出してコードや仕様をテキスト生成。API キー管理が必要で、LLM 単体のテキスト生成に留まっていた。
+>   - *現行 (v4.0)*: Antigravity の `invoke_subagent` を用い、フェーズごとに独立した **新規 Conversation（サブエージェント）** を立ち上げて自律実行。ツール（ファイル編集・コマンド実行・pytest 自己修復）をフル活用する真のエージェント体制へ刷新。
+> - **将来のエージェント（Claude Code / Codex）への移植性**:
+>   - エージェントの責務・プロンプトを `.agents/definitions/*.md` に分離。ファイル（`plan.md`, `specs/`）を介してやり取りするため、Claude Code CLI や Codex でもそのまま動作可能。
 
 ---
 
@@ -19,37 +20,31 @@
 | :--- | :--- | :--- |
 | 1 | **人間ゲートは3つに絞る** | ① Example Map（要件） ② API スキーマ（契約） ③ PR（最終成果物） |
 | 2 | **強制は仕組みで、指針はプロンプトで** | 守らせたいルールは hooks / CI / スクリプトで物理的に強制する。Skill は判断手順の提供に留める |
-| 3 | **状態はLLMに持たせない** | フェーズ・リトライ回数・予算はオーケストレーターが管理する。LLM は状態を読むだけで、書き換えられない |
-| 4 | **決定論的ファースト** | 機械で判定できるものは LLM に渡さない |
-| 5 | **ロールとモデルを分離** | ロールで定義し、モデルの割り当ては設定ファイルで切り替える |
-| 6 | **PBI 単位の縦切り** | 1 PBI = 1 パイプライン = 1 PR。コンテキストとレビュー負荷を抑える |
-| 7 | **計測して調整** | KPI を最初から取り、層の追加・削除はデータで判断する |
+| 3 | **ファイル駆動プロトコル (SSOT)** | 状態管理や Directive は専用メモリや外部 DB ではなく、`state.json`, `plan.md` という標準ファイルのみで行う（Claude Code / Codex との相互運用性を担保） |
+| 4 | **独立 Conversation (Subagent) 協調** | 各ロール（Spec, Design, App, BFF, Analyzer）を独立した会話セッションとして起動し、コンテキスト汚染を防ぎつつ UI 上で可視化する |
+| 5 | **決定論的ファースト** | 機械で判定できるものは LLM に渡さない |
+| 6 | **ロールとモデルを分離** | ロール定義（`.agents/definitions/`）と実行環境（Antigravity / Claude / Codex）を疎結合にする |
+| 7 | **PBI 単位の縦切り** | 1 PBI = 1 パイプライン = 1 PR。コンテキストとレビュー負荷を抑える |
+| 8 | **計測して調整** | KPI を最初から取り、層の追加・削除はデータで判断する |
 
 ---
 
-## 1. ロールとモデル割り当て（初期値）
+## 1. ロールとエージェント割り当て
 
-| ロール | 担当フェーズ | モデル（初期値） | 理由 |
+### 現行仕様 (v4.0 Agent-Native)
+各ロールは [`.agents/definitions/`](../.agents/definitions/) 配下に独立した定義 Markdown を持ち、親エージェントから `invoke_subagent` によって **新規 Conversation** として起動されます。
+
+| ロール | 定義ファイル | 起動形態 (Antigravity) | 責務と利用ツール |
 | :--- | :--- | :--- | :--- |
-| **Spec Agent** | 1-1 〜 1-3 | Gemini 3.8 Flash (High) | 曖昧さの発見と構造化が仕事。量が多いので速くて安いモデルに推論を厚めに |
-| **Design Agent** | 2-1, 4-1 | Gemini 3.8 Flash (High) | スキーマ案・ドメイン設計。誤りは後工程に響くため High |
-| **Implementer** | 4-2 (Red / Green / Refactor) | Gemini 3.8 Flash (Medium) | 回数が最も多い部分。コスト・速度重視 |
-| **Analyzer**（旧 Fable） | 5-3, 6 の失敗時 | Claude Opus 5.5 (High) | 根本原因の分析と Directive の策定。**コードは書かない（読み取り専用）** |
-| ~~Triage（旧 Jev）~~ | — | 初期は使わない | 自己リトライで代替。データを見てから導入を判断 → [ROADMAP](./ROADMAP.md) P3 |
+| **Spec Agent** | [`spec_agent.md`](../.agents/definitions/spec_agent.md) | 新規 Conversation 1 | 要件から Example Map と Gherkin シナリオを作成 (`write_to_file`) |
+| **Design Agent** | [`design_agent.md`](../.agents/definitions/design_agent.md) | 新規 Conversation 2 | Gherkin から OpenAPI 3.1.0 スキーマを作成 (`write_to_file`) |
+| **App Agent** | [`app_agent.md`](../.agents/definitions/app_agent.md) | 新規 Conversation 3 (並行) | App 層の DDD 設計・TDD（Red ➔ Green ➔ Refactor）を自律完遂 |
+| **BFF Agent** | [`bff_agent.md`](../.agents/definitions/bff_agent.md) | 新規 Conversation 4 (並行) | BFF 層の実装・Prism モック連携 TDD を自律完遂 |
+| **Analyzer Agent** | [`analyzer_agent.md`](../.agents/definitions/analyzer_agent.md) | 新規 Conversation 5 (必要時) | テスト失敗ログの根本原因分析 & Directive 策定（**コード編集禁止・読み取り専用**） |
 
-> [!TIP]
-> **調整ポイント**
-> - 設計起因のエスカレーションが多い場合 → 4-1 の後に **Analyzer による設計レビュー** を挟む
-> - 自己リトライの成功率が低い場合 → 2回目の自己リトライだけ **Implementer を High に昇格** させる（Analyzer より安い中間段階）
-
-```yaml
-# orchestrator/models.yaml（例）
-roles:
-  spec:        { model: gemini-3.8-flash, thinking: high }
-  design:      { model: gemini-3.8-flash, thinking: high }
-  implementer: { model: gemini-3.8-flash, thinking: medium, escalate_on_retry: high }
-  analyzer:    { model: claude-opus-5.5,  thinking: high, write_access: false }
-```
+> [!WARNING]
+> **【Deprecated】旧仕様 (v3.0): 直接 API 呼び出しと models.yaml**
+> 以前は `orchestrator/activities.py` から `google.genai` SDK を介して `gemini-3.8-flash` や `claude-opus-5.5` を直接 API 呼び出ししていました。この方式はトークン課金管理・API キー設定が必要であり、Antigravity のエージェント機能（ツール自律実行）が活かせないため **廃止（Deprecated）** となりました。現在はローカルの Antigravity セッションおよび Subagents にてネイティブに処理されます。
 
 ---
 
@@ -200,12 +195,14 @@ flowchart LR
 #### 2-2. モック生成 & 初期化
 * **モック**: 型とハンドラーの雛形は OpenAPI から生成する。シナリオ（409 重複、状態遷移など）は **Example Map / Gherkin 由来の fixture** から生成する
   * 原則は「手書き禁止」ではなく **生成元の一元化**。fixture の追加は許可するが、ハンドラーの直接編集は禁止する
-* **初期化**（オーケストレーター）: `tasks/{PBI-ID}/state.json`、`app/plan.md`、`bff/plan.md`、`audit.jsonl` を作る
+* **初期化**（StateManager）: `orchestrator/state_manager.py` が `tasks/{PBI-ID}/state.json`、`app/plan.md`、`bff/plan.md`、`audit.jsonl` を排他ロック付きで作成・初期化する
 
-### Phase 3: ディスパッチ
-* オーケストレーターが App / BFF パイプラインを **独立に** 起動する
-* エージェントは起動時に `plan.md`（現在の Directive と進捗）と Rules を読み込む
-* 一方のパイプラインが失敗しても、もう一方は止めない（合流するのは Phase 6 だけ）
+### Phase 3: ディスパッチ (新規 Conversation 並行起動)
+* 親エージェントが `invoke_subagent` を呼び出し、**App Agent と BFF Agent を 2 つの独立した新規 Conversation として並行起動**する
+* 各エージェントは自分自身の独立した会話セッション上で動作し、`tasks/{PBI-ID}/{comp}/plan.md`（Current Directive と進捗）と仕様（`specs/`）を読み込んで自律的に TDD を開始する
+* 一方のパイプラインが失敗・リトライしても、もう一方のコンテキストには一切影響しない（コンテキスト汚染の防止）
+* > [!NOTE]
+  > **【Deprecated】旧仕様 (v3.0)**: 以前は Temporal ワークフロー内で非同期 Activity として実行されていましたが、v4.0 では Antigravity Subagent（または Claude Code CLI の並行セッション）による独立プロセス協調に置き換えられました。
 
 ### Phase 4: 設計 & 二重ループ TDD
 
@@ -287,14 +284,27 @@ specs/
   api/v1/*.yaml                   # 人間ゲート2の対象
   mocks/fixtures/                 # シナリオ fixture（生成元）
 tasks/{PBI-ID}/
-  state.json                      # オーケストレーター専用（エージェントは読み取りのみ）
+  state.json                      # StateManager / 親エージェント管理（エージェントは読み取りのみ）
   app/plan.md                     # ビュー + Current Directive
   bff/plan.md
   audit.jsonl                     # 追記専用ログ
-orchestrator/                     # 状態機械・Rule Guard・モデル設定
-.agents/                          # Antigravity: hooks.json / skills / rules
-.claude/                          # Claude Code: settings.json (hooks/permissions) / skills
+orchestrator/
+  state_manager.py                # ファイル駆動型状態管理（アトミック排他制御）
+  guards/                         # TDD ガード・ルールガード・バリデータ
+  interactive.py                  # 対話実行エンジン
+  workflow.py                     # [Deprecated] 旧 Temporal ワークフロー定義
+  run_worker.py                   # [Deprecated] 旧 Temporal ワーカー
+.agents/
+  definitions/                    # 各ロール定義 (spec, design, app, bff, analyzer)
+  hooks.json                      # Antigravity ライフサイクルフック
+  skills/                         # workflow-runner, analyzer 等
+  rules/                          # コーディング・Gherkin規約
+.claude/                          # 将来の Claude Code 設定用 (settings.json / CLAUDE.md)
 ```
+
+> [!NOTE]
+> **【Deprecated】Temporal サーバー (workflow.py / run_worker.py)**:
+> v3.0 では Temporal Server を介してワークフロー状態を管理していましたが、v4.0 では `state_manager.py` によるファイル駆動（File-Driven Protocol）へ移行しました。Temporal 関連コードは後方互換用として残されていますが、新規開発パイプラインの実行には外部サーバーは不要です。
 
 ### `state.json`（正となる状態）
 ```json

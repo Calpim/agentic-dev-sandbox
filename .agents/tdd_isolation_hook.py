@@ -9,6 +9,11 @@ Fail-closed policy: Denies execution if the guard script is missing or fails.
 import json
 import runpy
 import sys
+try:
+    sys.stdin.reconfigure(encoding='utf-8')
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 from pathlib import Path
 
 try:

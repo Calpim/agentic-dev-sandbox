@@ -1,7 +1,7 @@
-# Project Agents Policy: AI-Driven Autonomous Development (v3.0)
+# Project Agents Policy: AI-Driven Autonomous Development (v4.0 Agent-Native)
 
 このリポジトリは、**Example Mapping × BDD × DDD × TDD** に基づく自律エージェント開発パイプラインのワークスペースです。
-各エージェントは Temporal オーケストレーターの指示（Directive）に従って動作します。
+各エージェント（Antigravity Subagent、Claude Code、Codex）は、ファイル駆動型プロトコル（File-Driven Protocol）と `plan.md` に記載された指示（Directive）に従って自律動作します。
 
 ## 1. ディレクトリ責務
 - `specs/example-maps/`: PBI の受け入れ条件と具体例（人間ゲート 1 の合意成果物）
@@ -9,14 +9,15 @@
 - `specs/features/app/`: App 層シナリオ（`@covers:BIZ-xxx` 必須）
 - `specs/features/bff/`: BFF 層シナリオ（`@covers:BIZ-xxx` 必須）
 - `specs/api/v1/`: OpenAPI スキーマ（人間ゲート 2 の合意成果物）
-- `tasks/{PBI-ID}/`: 実行コンテキスト
-  - `state.json`: 正となる状態（オーケストレーター専用・エージェントは読み取りのみ）
-  - `app/plan.md`: App Agent 用ビュー
-  - `bff/plan.md`: BFF Agent 用ビュー
+- `tasks/{PBI-ID}/`: 実行コンテキスト (Single Source of Truth)
+  - `state.json`: 正となる状態（オーケストレーター・親エージェント管理）
+  - `app/plan.md`: App Agent 用ビュー・指示書
+  - `bff/plan.md`: BFF Agent 用ビュー・指示書
   - `audit.jsonl`: 監査ログ（追記専用）
+- `.agents/definitions/`: 各エージェント（Spec, Design, App, BFF, Analyzer）の役割・ルール定義
 
 ## 2. 厳格なルール
-1. **スキーマ保護**: `specs/api/**` のファイルを直接編集してはならない。変更が必要な場合は差分提案（PATCH）としてオーケストレーターへ報告すること。
+1. **スキーマ保護**: `specs/api/**` のファイルを直接編集してはならない。変更が必要な場合は差分提案（PATCH）として親エージェントへ報告すること。
 2. **TDD分離（強制）**:
    - **Red フェーズ**: テストコードのみ作成・編集可。プロダクションコードの編集は禁止。
    - **Green / Refactor フェーズ**: プロダクションコードのみ編集可。テストコードの編集は禁止（テスト緩和の防止）。
