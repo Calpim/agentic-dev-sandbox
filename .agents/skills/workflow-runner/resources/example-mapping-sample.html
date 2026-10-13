@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Example Mapping Review: PBI-201</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border, #cbd5e1);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background,#0f172a)] text-[var(--foreground,#f8fafc)] antialiased p-4 sm:p-6 min-h-screen">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- Header Section -->
+    <header class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2.5 mb-1.5">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            Gate 1: Example Mapping Review
+          </span>
+          <span class="text-xs text-[var(--muted-foreground,#94a3b8)]">PBI-201</span>
+        </div>
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-[var(--foreground,#f8fafc)]">
+          カート決済におけるプロモーションクーポンの適用
+        </h1>
+        <p class="text-sm text-[var(--muted-foreground,#94a3b8)] mt-1">
+          ユーザーが購入手続き時に割引コードを入力し、条件判定を経て即座に注文合計金額へ反映される機能
+        </p>
+      </div>
+
+      <!-- Actions & View Switcher -->
+      <div class="flex items-center flex-wrap gap-2.5">
+        <div class="bg-[var(--background,#0f172a)] p-1 rounded-xl border border-[var(--border,#334155)] flex items-center gap-1">
+          <button id="viewBoardBtn" onclick="switchView('board')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30">
+            📌 ボード表示
+          </button>
+          <button id="viewTableBtn" onclick="switchView('table')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]">
+            📋 マトリクス表示
+          </button>
+          <button id="viewGherkinBtn" onclick="switchView('gherkin')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]">
+            🧪 Gherkin仕様
+          </button>
+        </div>
+
+        <button onclick="copyFeedback()" class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1.5 transition-all">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+          レビュー回答をコピー
+        </button>
+      </div>
+    </header>
+
+    <!-- Legend Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-amber-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-amber-300">Story (ストーリー)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">達成したい機能・価値</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-sky-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-sky-300">Rule (ビジネスルール)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">受け入れ基準・制約 (3件)</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-emerald-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-emerald-300">Example (具体例)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">正常・異常・境界値 (8件)</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-rose-400 shadow-sm flex-shrink-0 animate-pulse"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-rose-300">Question (確認事項)</p>
+          <p class="text-[11px] text-rose-200/80 truncate">人間の回答待ち (3件)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Questions / Human-in-the-Loop Callout Banner -->
+    <section class="bg-rose-950/30 border border-rose-500/40 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping"></span>
+          <h2 class="text-base font-bold text-rose-200">
+            ❓ AIからの確認事項 (Human-in-the-Loop) - 要回答
+          </h2>
+        </div>
+        <span class="text-xs text-rose-300 bg-rose-900/60 px-2.5 py-0.5 rounded-full font-mono border border-rose-500/30">
+          3 問の曖昧・エッジケースを検出
+        </span>
+      </div>
+      <p class="text-xs text-[var(--muted-foreground,#94a3b8)] mb-4">
+        以下の不確実性を人間が確定することで、実装段階の手戻りを防ぎます。回答を入力すると、そのまま承認プロンプトに反映できます。
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        <!-- Question 1 -->
+        <div class="bg-[var(--card,#1e293b)]/80 border border-rose-500/30 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-mono font-bold text-rose-400">Q1. 最低購入金額の計算基準</span>
+              <span class="text-[11px] text-amber-400 font-medium">BIZ-001関連</span>
+            </div>
+            <p class="text-xs text-[var(--foreground,#f8fafc)] leading-relaxed">
+              「5,000円以上」の判定基準は、送料や消費税を含みますか？それとも商品本体価格（税抜）のみですか？
+            </p>
+          </div>
+          <div class="space-y-1.5 pt-1">
+            <label class="text-[11px] text-[var(--muted-foreground,#94a3b8)] font-medium">回答選択または自由記述:</label>
+            <select id="ans-q1" class="w-full bg-[var(--background,#0f172a)] text-xs text-[var(--foreground,#f8fafc)] border border-[var(--border,#334155)] rounded-lg p-2 focus:ring-1 focus:ring-rose-400 focus:outline-none">
+              <option value="商品本体の税抜合計で判定する（送料・手数料は除く）">【推奨】商品本体の税抜合計で判定する（送料・手数料は除く）</option>
+              <option value="送料・消費税を含む最終支払見込み額で判定する">送料・消費税を含む最終支払見込み額で判定する</option>
+              <option value="税込の商品合計で判定する">税込の商品合計で判定する</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Question 2 -->
+        <div class="bg-[var(--card,#1e293b)]/80 border border-rose-500/30 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-mono font-bold text-rose-400">Q2. 有効期限の判定タイミング</span>
+              <span class="text-[11px] text-amber-400 font-medium">BIZ-002関連</span>
+            </div>
+            <p class="text-xs text-[var(--foreground,#f8fafc)] leading-relaxed">
+              カート適用時に有効で、決済確定時（クレカ認証待ち中など）に期限切れとなった場合、割引は成立しますか？
+            </p>
+          </div>
+          <div class="space-y-1.5 pt-1">
+            <label class="text-[11px] text-[var(--muted-foreground,#94a3b8)] font-medium">回答選択または自由記述:</label>
+            <select id="ans-q2" class="w-full bg-[var(--background,#0f172a)] text-xs text-[var(--foreground,#f8fafc)] border border-[var(--border,#334155)] rounded-lg p-2 focus:ring-1 focus:ring-rose-400 focus:outline-none">
+              <option value="注文確定ボタン押下時点のサーバー時刻で判定（期限切れならエラー）">【推奨】注文確定ボタン押下時点のサーバー時刻で厳格判定</option>
+              <option value="カート適用から15分間は期限切れでもロック保持して適用を認める">カート適用から15分間は期限切れでもロック保持して適用を認める</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Question 3 -->
+        <div class="bg-[var(--card,#1e293b)]/80 border border-rose-500/30 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-mono font-bold text-rose-400">Q3. 割引額が合計額を超過した時</span>
+              <span class="text-[11px] text-amber-400 font-medium">BIZ-001関連</span>
+            </div>
+            <p class="text-xs text-[var(--foreground,#f8fafc)] leading-relaxed">
+              仮に割引額（例: 2,000円）が商品小計（例: 1,800円）を上回った場合、請求額0円で残りは切り捨てですか？
+            </p>
+          </div>
+          <div class="space-y-1.5 pt-1">
+            <label class="text-[11px] text-[var(--muted-foreground,#94a3b8)] font-medium">回答選択または自由記述:</label>
+            <select id="ans-q3" class="w-full bg-[var(--background,#0f172a)] text-xs text-[var(--foreground,#f8fafc)] border border-[var(--border,#334155)] rounded-lg p-2 focus:ring-1 focus:ring-rose-400 focus:outline-none">
+              <option value="請求額0円とし、余剰分は切り捨て（お釣りは出ない）">【推奨】請求額0円とし、余剰分は切り捨て（お釣りは出ない）</option>
+              <option value="合計額未満での利用はエラーとし適用させない">合計額未満での利用はエラーとし適用させない</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 1: Board View (Default) -->
+    <div id="boardView" class="space-y-6">
+      <!-- Rule Columns Container -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        <!-- Column 1: BIZ-001 -->
+        <div class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-4 shadow-sm space-y-4">
+          <!-- Rule Header Card (Blue) -->
+          <div class="p-3.5 rounded-xl border border-sky-500/40 bg-sky-950/30">
+            <div class="flex items-center justify-between mb-1">
+              <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-sky-500/20 text-sky-300 font-mono">BIZ-001</span>
+              <span class="text-[11px] text-[var(--muted-foreground,#94a3b8)]">3 Examples</span>
+            </div>
+            <h3 class="text-sm font-bold text-sky-200">最低購入金額と割引額の適用</h3>
+            <p class="text-xs text-sky-100/70 mt-1">
+              購入金額が5,000円以上の場合に限り1,000円値引きを行い、5,000円未満の場合はエラーメッセージを返却する。
+            </p>
+          </div>
+
+          <!-- Examples (Green Cards) -->
+          <div class="space-y-2.5">
+            <!-- Ex 1 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 境界値（ちょうど5,000円）
+                </span>
+                <span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">正常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">合計: 5,000円、クーポン: 1,000円引</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 適用成功: 請求額 4,000円 (割引 1,000円)
+              </div>
+            </div>
+
+            <!-- Ex 2 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 通常の正常適用（高額）
+                </span>
+                <span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">正常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">合計: 12,800円、クーポン: 1,000円引</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 適用成功: 請求額 11,800円 (割引 1,000円)
+              </div>
+            </div>
+
+            <!-- Ex 3 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> 境界値未満（4,999円）
+                </span>
+                <span class="text-[11px] font-mono text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/20">異常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">合計: 4,999円、クーポン: 1,000円引</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 拒否: 422 Unprocessable Entity<br>
+                「あと1円の購入でクーポンが適用できます」
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: BIZ-002 -->
+        <div class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-4 shadow-sm space-y-4">
+          <!-- Rule Header Card (Blue) -->
+          <div class="p-3.5 rounded-xl border border-sky-500/40 bg-sky-950/30">
+            <div class="flex items-center justify-between mb-1">
+              <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-sky-500/20 text-sky-300 font-mono">BIZ-002</span>
+              <span class="text-[11px] text-[var(--muted-foreground,#94a3b8)]">3 Examples</span>
+            </div>
+            <h3 class="text-sm font-bold text-sky-200">有効期限とユーザー利用回数の制限</h3>
+            <p class="text-xs text-sky-100/70 mt-1">
+              指定された有効期間（JST）内かつ、1ユーザーアカウントにつき1回のみ利用可能とする。
+            </p>
+          </div>
+
+          <!-- Examples (Green Cards) -->
+          <div class="space-y-2.5">
+            <!-- Ex 4 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> 期限最終日の滑り込み
+                </span>
+                <span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">正常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">期限: 10/31 23:59:59、利用時: 10/31 23:59:00</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 適用成功: クーポン有効ステータス
+              </div>
+            </div>
+
+            <!-- Ex 5 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> 期限切れ（1秒超過）
+                </span>
+                <span class="text-[11px] font-mono text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/20">異常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">期限: 10/31 23:59:59、利用時: 11/01 00:00:00</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 拒否: 400 Bad Request<br>
+                「クーポンの有効期限が切れています」
+              </div>
+            </div>
+
+            <!-- Ex 6 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> 同一ユーザー2回目の利用
+                </span>
+                <span class="text-[11px] font-mono text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/20">異常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">ユーザー: USER-101 (注文履歴 #9822 で使用済)</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 拒否: 409 Conflict<br>
+                「このクーポンはお一人様1回限りのご利用です」
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 3: BIZ-003 -->
+        <div class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-4 shadow-sm space-y-4">
+          <!-- Rule Header Card (Blue) -->
+          <div class="p-3.5 rounded-xl border border-sky-500/40 bg-sky-950/30">
+            <div class="flex items-center justify-between mb-1">
+              <span class="px-2 py-0.5 text-[11px] font-bold rounded bg-sky-500/20 text-sky-300 font-mono">BIZ-003</span>
+              <span class="text-[11px] text-[var(--muted-foreground,#94a3b8)]">2 Examples</span>
+            </div>
+            <h3 class="text-sm font-bold text-sky-200">ポイント・複数クーポンの併用ルール</h3>
+            <p class="text-xs text-sky-100/70 mt-1">
+              1回の決済で適用できるプロモーションクーポンは1種類のみ。会員保有ポイントによる値引きとの併用は許可する。
+            </p>
+          </div>
+
+          <!-- Examples (Green Cards) -->
+          <div class="space-y-2.5">
+            <!-- Ex 7 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> クーポン + ポイント併用
+                </span>
+                <span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">正常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">合計: 6,000円、クーポン: 1,000円、PT利用: 500pt</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 適用成功: 請求額 4,500円<br>
+                (6000 - 1000 - 500 = 4500)
+              </div>
+            </div>
+
+            <!-- Ex 8 -->
+            <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/60 transition-colors">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[11px] font-bold text-amber-300 flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> 2つ目のクーポン追加入力
+                </span>
+                <span class="text-[11px] font-mono text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/20">異常系</span>
+              </div>
+              <p class="text-xs text-[var(--foreground,#f8fafc)] font-medium">クーポンA適用済の状態で、別クーポンBを入力</p>
+              <div class="mt-2 text-[11px] text-[var(--muted-foreground,#94a3b8)] bg-[var(--background,#0f172a)]/70 p-2 rounded-lg font-mono">
+                ➜ 拒否: 409 Conflict<br>
+                「クーポンは1注文につき1種類のみ有効です」
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- VIEW 2: Matrix Table View (Hidden by default) -->
+    <div id="tableView" class="hidden bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl overflow-hidden shadow-sm">
+      <div class="p-4 border-b border-[var(--border,#334155)] flex items-center justify-between">
+        <h3 class="text-sm font-bold text-[var(--foreground,#f8fafc)]">Example Mapping 仕様マトリクス一覧</h3>
+        <span class="text-xs text-[var(--muted-foreground,#94a3b8)] font-mono">合計: 3 ルール / 8 具体例</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr class="bg-[var(--background,#0f172a)]/80 text-[var(--muted-foreground,#94a3b8)] border-b border-[var(--border,#334155)]">
+              <th class="p-3 font-semibold">ルールID</th>
+              <th class="p-3 font-semibold">ビジネスルール概要</th>
+              <th class="p-3 font-semibold">種別</th>
+              <th class="p-3 font-semibold">具体例 (入力・条件)</th>
+              <th class="p-3 font-semibold">期待される結果 (出力)</th>
+              <th class="p-3 font-semibold text-center">カバレッジ</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--border,#334155)] text-[var(--foreground,#f8fafc)]">
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-001</td>
+              <td class="p-3">最低購入金額（5,000円）以上で1,000円引き</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">境界値/正常</span></td>
+              <td class="p-3 font-medium">合計: 5,000円, クーポン: 1,000円OFF</td>
+              <td class="p-3 font-mono text-emerald-300">適用成功 (請求額: 4,000円)</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-001</td>
+              <td class="p-3">最低購入金額（5,000円）以上で1,000円引き</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">正常系</span></td>
+              <td class="p-3 font-medium">合計: 12,800円, クーポン: 1,000円OFF</td>
+              <td class="p-3 font-mono text-emerald-300">適用成功 (請求額: 11,800円)</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-001</td>
+              <td class="p-3">最低購入金額（5,000円）以上で1,000円引き</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 font-bold">境界値/異常</span></td>
+              <td class="p-3 font-medium">合計: 4,999円, クーポン: 1,000円OFF</td>
+              <td class="p-3 font-mono text-amber-300">422 拒否（不足分案内）</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-002</td>
+              <td class="p-3">有効期限（JST）および1人1回制限</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">正常系</span></td>
+              <td class="p-3 font-medium">期限最終日 23:59:00 の適用実行</td>
+              <td class="p-3 font-mono text-emerald-300">適用成功</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-002</td>
+              <td class="p-3">有効期限（JST）および1人1回制限</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 font-bold">異常系</span></td>
+              <td class="p-3 font-medium">期限終了翌秒 00:00:00 の適用実行</td>
+              <td class="p-3 font-mono text-rose-300">400 Bad Request（期限切れ）</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-002</td>
+              <td class="p-3">有効期限（JST）および1人1回制限</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 font-bold">異常系</span></td>
+              <td class="p-3 font-medium">同一ユーザーによる2回目利用試行</td>
+              <td class="p-3 font-mono text-rose-300">409 Conflict（既に使用済）</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-003</td>
+              <td class="p-3">複数クーポン不可、ポイント併用可</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">複合/正常</span></td>
+              <td class="p-3 font-medium">合計6,000円 + 1,000円引 + 500pt</td>
+              <td class="p-3 font-mono text-emerald-300">適用成功 (請求額: 4,500円)</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+            <tr class="hover:bg-[var(--background,#0f172a)]/40 transition-colors">
+              <td class="p-3 font-mono font-bold text-sky-400">BIZ-003</td>
+              <td class="p-3">複数クーポン不可、ポイント併用可</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 font-bold">異常系</span></td>
+              <td class="p-3 font-medium">クーポンA適用中にクーポンB入力</td>
+              <td class="p-3 font-mono text-rose-300">409 Conflict（重複適用拒否）</td>
+              <td class="p-3 text-center"><span class="text-emerald-400">✔ App / BFF</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- VIEW 3: Gherkin View (Hidden by default) -->
+    <div id="gherkinView" class="hidden bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-sm space-y-4 font-mono text-xs">
+      <div class="flex items-center justify-between pb-3 border-b border-[var(--border,#334155)]">
+        <div>
+          <span class="text-xs font-bold text-emerald-400">specs/features/business/PBI-201.feature</span>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] font-sans mt-0.5">Example Mapping から自動導出された宣言的ビジネスGherkin</p>
+        </div>
+        <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold"># language: ja</span>
+      </div>
+
+      <pre class="overflow-x-auto text-[var(--foreground,#f8fafc)] leading-relaxed p-4 bg-[var(--background,#0f172a)] rounded-xl border border-[var(--border,#334155)]">
+# language: ja
+機能: カート決済におけるプロモーションクーポンの適用
+
+  @BIZ-001
+  ルール: 最低購入金額と割引額の適用
+    シナリオ: 境界値ジャストの注文合計で適用成功
+      前提 カートの注文合計金額が「5,000円」である
+      もし 1,000円引きクーポン「SAVE1000」を適用したとき
+      ならば 請求金額が「4,000円」となり割引が適用される
+
+    シナリオ: 最低金額未満での拒否（境界値-1円）
+      前提 カートの注文合計金額が「4,999円」である
+      もし 1,000円引きクーポン「SAVE1000」を適用したとき
+      ならば クーポンは適用されず「あと1円の購入が必要です」と拒否される
+
+  @BIZ-002
+  ルール: 有効期限とユーザー利用回数の制限
+    シナリオ: 有効期限切れのクーポン入力
+      前提 クーポンの有効期限が「2026-10-31 23:59:59」である
+      かつ 現在時刻が「2026-11-01 00:00:00」である
+      もし クーポンコードを入力して適用を試みたとき
+      ならば 「有効期限が切れています」と拒否される
+
+    シナリオ: 同一ユーザーの2回目利用拒否
+      前提 ユーザーが既に同クーポンを利用した注文履歴を持つ
+      もし 再度同じクーポンコードを入力したとき
+      ならば 「お一人様1回限りのご利用です」と拒否される
+
+  @BIZ-003
+  ルール: ポイント・複数クーポンの併用ルール
+    シナリオ: クーポンと保有ポイントの併用決済
+      前提 カート合計「6,000円」に対しクーポン「1,000円引」が適用されている
+      もし 保有ポイントから「500pt」を充当したとき
+      ならば 最終請求額が「4,500円」となる
+</pre>
+    </div>
+
+    <!-- Review Submission / Approval Footer -->
+    <footer class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div>
+        <h4 class="text-sm font-bold text-[var(--foreground,#f8fafc)]">Gate 1 レビュー意思決定</h4>
+        <p class="text-xs text-[var(--muted-foreground,#94a3b8)]">質問への回答を選択の上、承認または修正指示を送信してください</p>
+      </div>
+      <div class="flex items-center gap-3 w-full sm:w-auto">
+        <button onclick="requestChanges()" class="flex-1 sm:flex-none px-4 py-2 text-xs font-semibold rounded-xl border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors">
+          ✏️ 修正・差し戻し指示
+        </button>
+        <button onclick="approveGate1()" class="flex-1 sm:flex-none px-5 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-400 hover:to-emerald-400 text-white shadow-md transition-all flex items-center justify-center gap-2">
+          <span>✅ 承認して Phase 2 (OpenAPI Draft) へ</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 hidden bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl items-center gap-2 transition-all">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+      <span id="toastMsg">回答内容をクリップボードにコピーしました！</span>
+    </div>
+
+  </div>
+
+  <script>
+    function switchView(view) {
+      const board = document.getElementById('boardView');
+      const table = document.getElementById('tableView');
+      const gherkin = document.getElementById('gherkinView');
+      const bBtn = document.getElementById('viewBoardBtn');
+      const tBtn = document.getElementById('viewTableBtn');
+      const gBtn = document.getElementById('viewGherkinBtn');
+
+      const activeClass = ['bg-sky-500/20', 'text-sky-300', 'border', 'border-sky-500/30'];
+      const inactiveClass = ['text-[var(--muted-foreground,#94a3b8)]'];
+
+      [bBtn, tBtn, gBtn].forEach(b => {
+        b.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]';
+      });
+
+      board.classList.add('hidden');
+      table.classList.add('hidden');
+      gherkin.classList.add('hidden');
+
+      if (view === 'board') {
+        board.classList.remove('hidden');
+        bBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      } else if (view === 'table') {
+        table.classList.remove('hidden');
+        tBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      } else if (view === 'gherkin') {
+        gherkin.classList.remove('hidden');
+        gBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      }
+    }
+
+    function getFeedbackPayload() {
+      const q1 = document.getElementById('ans-q1').value;
+      const q2 = document.getElementById('ans-q2').value;
+      const q3 = document.getElementById('ans-q3').value;
+      return `【Gate 1: Example Mapping レビュー回答】\n` +
+             `- Q1 (最低購入金額の基準): ${q1}\n` +
+             `- Q2 (有効期限の判定タイミング): ${q2}\n` +
+             `- Q3 (割引額超過時の扱い): ${q3}\n`;
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      toastMsg.textContent = msg;
+      toast.classList.remove('hidden');
+      toast.classList.add('flex');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+        toast.classList.remove('flex');
+      }, 3500);
+    }
+
+    function copyFeedback() {
+      const text = getFeedbackPayload();
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('質問への回答テキストをコピーしました！チャットに貼り付け可能です');
+      });
+    }
+
+    function approveGate1() {
+      const text = getFeedbackPayload() + `\n判定: 承認（Phase 2: OpenAPI 設計へ進む）`;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('承認ステータスと回答をコピーしました。チャットで送信してください');
+      });
+    }
+
+    function requestChanges() {
+      const text = getFeedbackPayload() + `\n判定: 修正指示あり（詳細をチャットでお知らせください）`;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('差し戻し指示テキストをコピーしました');
+      });
+    }
+  </script>
+</body>
+</html>

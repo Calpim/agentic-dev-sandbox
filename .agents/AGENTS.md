@@ -4,7 +4,7 @@
 各エージェント（Antigravity Subagent、Claude Code、Codex）は、ファイル駆動型プロトコル（File-Driven Protocol）と `plan.md` に記載された指示（Directive）に従って自律動作します。
 
 ## 1. ディレクトリ責務
-- `specs/example-maps/`: PBI の受け入れ条件と具体例（人間ゲート 1 の合意成果物）
+- `specs/example-maps/`: PBI の受け入れ条件と具体例（機械可読の `.md` および 人間レビュー用 `.html`、人間ゲート 1 の合意成果物）
 - `specs/features/business/`: 宣言的・日本語のビジネス Gherkin
 - `specs/features/app/`: App 層シナリオ（`@covers:BIZ-xxx` 必須）
 - `specs/features/bff/`: BFF 層シナリオ（`@covers:BIZ-xxx` 必須）

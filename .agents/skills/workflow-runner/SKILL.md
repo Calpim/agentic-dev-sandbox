@@ -56,16 +56,17 @@ flowchart TD
      # 要件概要: {pbi_content}
 
      作成対象ファイル:
-     - specs/example-maps/{pbi_id}.md
+     - specs/example-maps/{pbi_id}.md (Markdown 正本)
+     - specs/example-maps/{pbi_id}.html (人間レビュー用インタラクティブHTMLビューワー)
      - specs/features/business/{pbi_id}.feature
      - specs/features/app/{pbi_id}.feature
      - specs/features/bff/{pbi_id}.feature
 
      すべてのファイルを作成し終えたら、作成完了を報告してください。
      ```
-3. Spec Agent の完了通知を受信したら、生成された `specs/example-maps/{pbi_id}.md` を読み取り、**ルール（BIZ-xxx）、具体例、確認事項** をチャット上に要約して提示する。
+3. Spec Agent の完了通知を受信したら、生成された `specs/example-maps/{pbi_id}.html` をレビュー用アーティファクトとして提示（`[HTMLレビューを開く](file:///...)`）し、**ルール（BIZ-xxx）、具体例、確認事項** をチャット上に要約して提示する。
 4. **`ask_question` ツールを呼び出してインタラクティブ承認モーダルを表示する**：
-   - **Question**: `【Gate 1: Example Map 確認・承認】specs/example-maps/{pbi_id}.md を生成しました。ルールと具体例、確認事項を確認してください。この内容で承認して Phase 2 (OpenAPI 設計) に進みますか？`
+   - **Question**: `【Gate 1: Example Map 確認・承認】HTMLレビュー資料 (specs/example-maps/{pbi_id}.html) を生成しました。ボード上でルールと具体例、AI確認事項を確認・回答してください。この内容で承認して Phase 2 (OpenAPI 設計) に進みますか？`
    - **Options**:
      - `(Recommended) 承認して Phase 2 (OpenAPI Draft) へ進む`
      - `修正を指示する（ルールや具体例の追記・変更）`
