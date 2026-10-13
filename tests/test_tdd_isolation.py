@@ -223,6 +223,7 @@ def test_state_json_drives_tdd_isolation_for_general_paths(tmp_path: Path):
 
     # テスト対象のスクリプト実行時、repo_root を tmp_path / repo に向けるため PYTHONPATH 等を設定
     from orchestrator.guards.tdd_isolation import get_current_phase
+
     assert get_current_phase("src/app/models/user.py", repo) == "RED"
     assert get_current_phase("src/app/tests/test_user.py", repo) == "RED"
 
@@ -233,4 +234,3 @@ def test_state_json_drives_tdd_isolation_for_general_paths(tmp_path: Path):
     )
     assert get_current_phase("src/app/models/user.py", repo) == "GREEN"
     assert get_current_phase("src/app/tests/test_user.py", repo) == "GREEN"
-

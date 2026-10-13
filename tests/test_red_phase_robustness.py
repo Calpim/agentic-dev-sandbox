@@ -8,6 +8,8 @@ from orchestrator.activities import BASE_DIR, run_tdd_cycle_activity
 @pytest.fixture(autouse=True)
 def cleanup_generated_artifacts():
     def _clean():
+        import shutil
+
         for comp in ("app", "bff"):
             test_dir = BASE_DIR / "src" / comp / "tests"
             if test_dir.exists():
@@ -15,6 +17,11 @@ def cleanup_generated_artifacts():
                     f.unlink()
                 for f in (BASE_DIR / "src" / comp).glob("pbi_red_*_service.py"):
                     f.unlink()
+        tasks_dir = BASE_DIR / "tasks"
+        if tasks_dir.exists():
+            for pbi_dir in tasks_dir.glob("PBI-RED-*"):
+                if pbi_dir.is_dir():
+                    shutil.rmtree(pbi_dir, ignore_errors=True)
 
     _clean()
     yield

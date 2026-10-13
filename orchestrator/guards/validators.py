@@ -117,8 +117,8 @@ def validate_openapi_spec(
     strict: bool = False,
 ) -> Dict[str, Any]:
     """
-    OpenAPI 3.0.3 仕様への適合性を検証する (Issue #17).
-    - openapi: '3.0.0' 〜 '3.0.3' (厳格ホワイトリスト)
+    OpenAPI 3.0.3 / 3.1.x 仕様への適合性を検証する (Issue #17).
+    - openapi: '3.0.0' 〜 '3.0.3' または '3.1.x' (ホワイトリスト)
     - info: title, version (文字列)
     - paths: dict であり、各パスが '/' で始まり、少なくとも1つの HTTP メソッドと responses を持つこと
     strict=True の場合、検証失敗時に ValueError を発生させる (fail-closed)。
@@ -141,14 +141,12 @@ def validate_openapi_spec(
         errors.append(f"Expected str or dict, got {type(schema_content)}")
 
     if not errors:
-        # 1. openapi バージョン (3.0.0 〜 3.0.3 のみ許可)
+        # 1. openapi バージョン (3.0.0 〜 3.0.3 および 3.1.x を許可)
         openapi_ver = parsed.get("openapi")
         if openapi_ver is None:
             errors.append("Missing required 'openapi' version field.")
-        elif not re.match(r"^3\.0\.[0-3]$", str(openapi_ver).strip()):
-            errors.append(
-                f"Unsupported OpenAPI version '{openapi_ver}'. Expected '3.0.0', '3.0.1', '3.0.2', or '3.0.3'."
-            )
+        elif not re.match(r"^(3\.0\.[0-3]|3\.1\.[0-9]+)$", str(openapi_ver).strip()):
+            errors.append(f"Unsupported OpenAPI version '{openapi_ver}'. Expected '3.0.0'-'3.0.3' or '3.1.x'.")
 
         # 2. info オブジェクト
         info = parsed.get("info")

@@ -34,8 +34,9 @@ def test_state_manager_resync_directive(tmp_path: Path):
     # audit.jsonl の検証
     audit_file = tmp_path / "tasks" / pbi_id / "audit.jsonl"
     logs = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").splitlines()]
-    resync_logs = [log for log in logs if log["event"] == "DIRECTIVE_UPDATED" and log["details"]["directive"] == "RESYNC"]
+    resync_logs = [
+        log for log in logs if log["event"] == "DIRECTIVE_UPDATED" and log["details"]["directive"] == "RESYNC"
+    ]
     assert len(resync_logs) == 1
     assert resync_logs[0]["details"]["component"] == "app"
     assert "OpenAPI schema updated" in resync_logs[0]["details"]["reason"]
-
