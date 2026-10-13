@@ -112,6 +112,7 @@ def status(
 
     console.print(table)
 
+
 @app.command()
 def phase(
     pbi_id: str = typer.Argument(..., help="PBIの識別子 (例: PBI-101)"),
@@ -141,7 +142,9 @@ def phase(
     except ValueError as e:
         console.print(f"[bold red]入力エラー: {e}[/bold red]")
         raise typer.BadParameter(str(e))
-    console.print(f"[bold green]フェーズを更新しました: {pbi_id} ({comp_norm}) -> {phase_name.upper()} ({status})[/bold green]")
+    console.print(
+        f"[bold green]フェーズを更新しました: {pbi_id} ({comp_norm}) -> {phase_name.upper()} ({status})[/bold green]"
+    )
 
 
 @app.command()

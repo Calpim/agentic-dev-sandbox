@@ -69,9 +69,7 @@ class StateManager:
         for component in ("app", "bff"):
             component_dir = task_dir / component
             component_dir.mkdir(parents=True, exist_ok=True)
-            (component_dir / "plan.md").write_text(
-                self._plan_content(pbi_id, component, schema_path), encoding="utf-8"
-            )
+            (component_dir / "plan.md").write_text(self._plan_content(pbi_id, component, schema_path), encoding="utf-8")
 
     @staticmethod
     def _plan_content(pbi_id: str, component: str, schema_path: str) -> str:

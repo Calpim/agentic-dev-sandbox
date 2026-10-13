@@ -205,7 +205,9 @@ def update_pipeline_phase_atomic(
     phase = phase.strip().upper()
     status = status.strip().upper()
     if component not in VALID_PIPELINE_COMPONENTS:
-        raise ValueError(f"Invalid component '{component}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_COMPONENTS))}.")
+        raise ValueError(
+            f"Invalid component '{component}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_COMPONENTS))}."
+        )
     if phase not in VALID_PIPELINE_PHASES:
         raise ValueError(f"Invalid phase '{phase}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_PHASES))}.")
     if status not in VALID_PIPELINE_STATUSES:

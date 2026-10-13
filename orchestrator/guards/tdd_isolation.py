@@ -86,7 +86,7 @@ def get_current_phase(rel_path: str, repo_root: Path) -> str:
         else:
             pbi_dirs = sorted(
                 pbi_dirs,
-                key=lambda d: (d / 'state.json').stat().st_mtime if (d / 'state.json').exists() else 0,
+                key=lambda d: (d / "state.json").stat().st_mtime if (d / "state.json").exists() else 0,
                 reverse=True,
             )
 

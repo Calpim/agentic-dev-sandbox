@@ -27,5 +27,3 @@ src/
 .DS_Store
 Thumbs.db
 
-# Agent hook session cache
-.agents/.agents/

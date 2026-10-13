@@ -60,7 +60,6 @@ def test_set_directive(tmp_path: Path):
     assert state["pipelines"]["app"]["directive"] == "FIX_TEST"
 
 
-
 def test_set_directive_fallback(tmp_path: Path):
     sm = StateManager(base_dir=tmp_path)
     pbi_id = "PBI-TEST-004"
@@ -123,4 +122,3 @@ def test_cli_phase_and_commands(tmp_path: Path, monkeypatch):
     res = runner.invoke(app, ["reset", pbi_id])
     assert res.exit_code == 0
     assert "リセットしました" in res.output
-

@@ -169,7 +169,7 @@ paths:
 
 
 def test_openapi_version_strict_3_0_0_to_3_0_3():
-    """OpenAPI バージョンは 3.0.0 〜 3.0.3 のホワイトリストのみ許可され、3.0.4 や 3.0.99 は拒否されること"""
+    """OpenAPI バージョンは 3.0.0 〜 3.0.3 および 3.1.x のホワイトリストのみ許可され、他は拒否されること"""
     template = """openapi: {ver}
 info: {{title: Test, version: '1.0'}}
 paths:
@@ -177,13 +177,13 @@ paths:
     get:
       responses: {{'200': {{description: ok}}}}
 """
-    # 許可されるバージョン
-    for ver in ["3.0.0", "3.0.1", "3.0.2", "3.0.3"]:
+    # 許可されるバージョン (3.0.0-3.0.3 および 3.1.x)
+    for ver in ["3.0.0", "3.0.1", "3.0.2", "3.0.3", "3.1.0", "3.1.1"]:
         res = validate_openapi_spec(template.format(ver=ver), strict=True)
         assert res["is_valid"] is True
 
     # 拒否されるバージョン
-    for bad_ver in ["3.0.4", "3.0.99", "3.0.foo", "3.1.0", "4.0.0"]:
+    for bad_ver in ["3.0.4", "3.0.99", "3.0.foo", "3.2.0", "4.0.0"]:
         res = validate_openapi_spec(template.format(ver=bad_ver), strict=False)
         assert res["is_valid"] is False
         assert any("Unsupported OpenAPI version" in e for e in res["errors"])
