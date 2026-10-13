@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Example Mapping Review: {{PBI_ID}}</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border, #cbd5e1); border-radius: 9999px; }
+  </style>
+</head>
+<body class="bg-[var(--background,#0f172a)] text-[var(--foreground,#f8fafc)] antialiased p-4 sm:p-6 min-h-screen">
+
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- Header Section -->
+    <header class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2.5 mb-1.5">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            Gate 1: Example Mapping Review
+          </span>
+          <span class="text-xs text-[var(--muted-foreground,#94a3b8)] font-mono">{{PBI_ID}}</span>
+        </div>
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-[var(--foreground,#f8fafc)]">
+          {{PBI_TITLE}}
+        </h1>
+        <p class="text-sm text-[var(--muted-foreground,#94a3b8)] mt-1">
+          {{PBI_DESCRIPTION}}
+        </p>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-2.5">
+        <div class="bg-[var(--background,#0f172a)] p-1 rounded-xl border border-[var(--border,#334155)] flex items-center gap-1">
+          <button id="viewBoardBtn" onclick="switchView('board')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30">
+            📌 ボード表示
+          </button>
+          <button id="viewTableBtn" onclick="switchView('table')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]">
+            📋 マトリクス表示
+          </button>
+          <button id="viewGherkinBtn" onclick="switchView('gherkin')" class="px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]">
+            🧪 Gherkin仕様
+          </button>
+        </div>
+
+        <button onclick="copyFeedback()" class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center gap-1.5 transition-all" title="選択した回答内容をコピーしてチャットに貼り付けられます">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+          📋 回答のみをコピー
+        </button>
+      </div>
+    </header>
+
+    <!-- Legend Bar -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-amber-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-amber-300">Story (ストーリー)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">達成したい機能・価値</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-sky-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-sky-300">Rule (ビジネスルール)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">受け入れ基準・制約</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-emerald-400 shadow-sm flex-shrink-0"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-emerald-300">Example (具体例)</p>
+          <p class="text-[11px] text-[var(--muted-foreground,#94a3b8)] truncate">正常・異常・境界値</p>
+        </div>
+      </div>
+      <div class="p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 flex items-center gap-3">
+        <div class="w-3.5 h-3.5 rounded bg-rose-400 shadow-sm flex-shrink-0 animate-pulse"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-rose-300">Question (確認事項)</p>
+          <p class="text-[11px] text-rose-200/80 truncate">人間の回答待ち (HIL)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Questions / Human-in-the-Loop Section -->
+    <section class="bg-rose-950/30 border border-rose-500/40 rounded-2xl p-5 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping"></span>
+          <h2 class="text-base font-bold text-rose-200">
+            ❓ AIからの確認事項 (Human-in-the-Loop) - 要回答
+          </h2>
+        </div>
+      </div>
+      <p class="text-xs text-[var(--muted-foreground,#94a3b8)] mb-4">
+        仕様の不確実性・エッジケースについて人間が確定してください。回答を選択して下のボタンを押すと、チャット貼り付け用テキストがコピーされます。
+      </p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <!-- {{QUESTIONS_BLOCK}} -->
+      </div>
+    </section>
+
+    <!-- VIEW 1: Board View -->
+    <div id="boardView" class="space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <!-- {{RULES_COLUMNS_BLOCK}} -->
+      </div>
+    </div>
+
+    <!-- VIEW 2: Matrix Table View -->
+    <div id="tableView" class="hidden bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl overflow-hidden shadow-sm">
+      <!-- {{MATRIX_TABLE_BLOCK}} -->
+    </div>
+
+    <!-- VIEW 3: Gherkin View -->
+    <div id="gherkinView" class="hidden bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-sm space-y-4 font-mono text-xs">
+      <!-- {{GHERKIN_CODE_BLOCK}} -->
+    </div>
+
+    <!-- Review Submission / Approval Footer -->
+    <footer class="bg-[var(--card,#1e293b)] border border-[var(--border,#334155)] rounded-2xl p-5 shadow-lg space-y-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border,#334155)]">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 font-mono">レビュー手順</span>
+            <h4 class="text-sm font-bold text-[var(--foreground,#f8fafc)]">レビュー結果をクリップボードにコピーしてチャットへ送信</h4>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground,#94a3b8)] mt-1">
+            上の質問の回答を選んだら、下のボタンを押してテキストをコピーし、チャット欄または承認モーダルに <kbd class="px-1.5 py-0.5 rounded bg-[var(--background,#0f172a)] border border-[var(--border,#334155)] font-mono text-[10px]">Ctrl+V</kbd> で貼り付けてください。
+          </p>
+        </div>
+        <div class="flex-shrink-0 text-right hidden sm:block">
+          <span class="text-[11px] text-amber-400 font-medium">※チャット側の承認ボタンを押すと次フェーズへ進みます</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+        <div class="text-xs text-[var(--muted-foreground,#94a3b8)] flex items-center gap-1.5">
+          <svg class="w-4 h-4 text-sky-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <span>ボタンを押すと回答＋判定文がクリップボードに入ります</span>
+        </div>
+        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+          <button onclick="requestChanges()" class="flex-1 sm:flex-none px-4 py-2 text-xs font-semibold rounded-xl border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+            <span>📋 修正指示テキストをコピー</span>
+          </button>
+          <button onclick="approveGate1()" class="flex-1 sm:flex-none px-5 py-2 text-xs font-semibold rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-400 hover:to-emerald-400 text-white shadow-md transition-all flex items-center justify-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+            <span>📋 承認テキストをコピー（チャット貼付用）</span>
+          </button>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 hidden bg-emerald-600 text-white text-xs font-semibold px-4 py-3 rounded-xl shadow-2xl items-center gap-2 transition-all z-50">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+      <span id="toastMsg">回答内容をクリップボードにコピーしました！チャットに Ctrl+V で貼り付けてください</span>
+    </div>
+
+  </div>
+
+  <script>
+    function switchView(view) {
+      const board = document.getElementById('boardView');
+      const table = document.getElementById('tableView');
+      const gherkin = document.getElementById('gherkinView');
+      const bBtn = document.getElementById('viewBoardBtn');
+      const tBtn = document.getElementById('viewTableBtn');
+      const gBtn = document.getElementById('viewGherkinBtn');
+
+      [bBtn, tBtn, gBtn].forEach(b => {
+        b.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all text-[var(--muted-foreground,#94a3b8)] hover:text-[var(--foreground,#f8fafc)]';
+      });
+
+      board.classList.add('hidden');
+      table.classList.add('hidden');
+      gherkin.classList.add('hidden');
+
+      if (view === 'board') {
+        board.classList.remove('hidden');
+        bBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      } else if (view === 'table') {
+        table.classList.remove('hidden');
+        tBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      } else if (view === 'gherkin') {
+        gherkin.classList.remove('hidden');
+        gBtn.className = 'px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      }
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      toastMsg.textContent = msg;
+      toast.classList.remove('hidden');
+      toast.classList.add('flex');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+        toast.classList.remove('flex');
+      }, 4500);
+    }
+
+    function getFeedbackPayload() {
+      let result = `【Gate 1: Example Mapping レビュー回答】\n`;
+      const inputs = document.querySelectorAll('[id^="ans-q"]');
+      inputs.forEach(el => {
+        result += `- ${el.id}: ${el.value}\n`;
+      });
+      return result;
+    }
+
+    function copyFeedback() {
+      navigator.clipboard.writeText(getFeedbackPayload()).then(() => {
+        showToast('📋 Q&A回答をコピーしました！チャット欄に Ctrl+V で貼り付けてください');
+      });
+    }
+
+    function approveGate1() {
+      navigator.clipboard.writeText(getFeedbackPayload() + `\n判定: 承認（Phase 2: OpenAPI 設計へ進む）`).then(() => {
+        showToast('📋 承認テキストをコピーしました！チャット欄または承認モーダルに Ctrl+V で貼り付けてください');
+      });
+    }
+
+    function requestChanges() {
+      navigator.clipboard.writeText(getFeedbackPayload() + `\n判定: 修正指示あり（修正内容を追記してチャットへ送信してください）`).then(() => {
+        showToast('📋 修正指示テキストをコピーしました！チャット欄に Ctrl+V で貼り付けてください');
+      });
+    }
+  </script>
+</body>
+</html>
