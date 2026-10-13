@@ -31,7 +31,7 @@ SCHEMA_PATTERN = re.compile(r"^specs/api/", re.IGNORECASE)
 
 # ガード設定ファイル・ガード本体・状態正本の保護 (フェーズ不問で直接編集禁止)
 PROTECTED_CONFIG_PATTERN = re.compile(
-    r"^(\.agents/hooks\.json$|\.agents/tdd_isolation_hook\.py$|orchestrator/guards/|tasks/[^/]+/state\.json$)",
+    r"^(\.agents/|orchestrator/guards/|tasks/[^/]+/state\.json$)",
     re.IGNORECASE,
 )
 
