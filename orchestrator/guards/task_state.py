@@ -29,6 +29,7 @@ VALID_PIPELINE_STATUSES = {
     "COMPLETED",
     "FAILED",
     "BLOCKED",
+    "ESCALATED_HUMAN",
 }
 
 
