@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from orchestrator.activities import draft_schema_activity
+from orchestrator.activities import BASE_DIR, draft_schema_activity
 from orchestrator.guards.task_state import (
     _acquire_os_lock,
     _release_os_lock,
@@ -15,6 +15,21 @@ from orchestrator.guards.task_state import (
     update_task_state,
 )
 from orchestrator.guards.validators import validate_openapi_spec
+
+
+@pytest.fixture(autouse=True)
+def cleanup_schema_artifacts():
+    pbi_ids = ["PBI-SCHEMA-GUARD-01"]
+
+    def _clean():
+        for pbi in pbi_ids:
+            f = BASE_DIR / "specs" / "api" / "v1" / f"{pbi}.yaml"
+            if f.exists():
+                f.unlink()
+
+    _clean()
+    yield
+    _clean()
 
 
 def test_concurrent_state_updates(tmp_path: Path):

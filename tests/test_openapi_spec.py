@@ -5,7 +5,22 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import yaml
 
-from orchestrator.activities import draft_schema_activity
+from orchestrator.activities import BASE_DIR, draft_schema_activity
+
+
+@pytest.fixture(autouse=True)
+def cleanup_openapi_artifacts():
+    pbi_ids = ["PBI-666", "PBI-777", "PBI-888", "PBI-999"]
+
+    def _clean():
+        for pbi in pbi_ids:
+            f = BASE_DIR / "specs" / "api" / "v1" / f"{pbi}.yaml"
+            if f.exists():
+                f.unlink()
+
+    _clean()
+    yield
+    _clean()
 
 
 @pytest.mark.asyncio

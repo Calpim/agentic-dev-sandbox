@@ -5,10 +5,27 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from orchestrator.activities import (
+    BASE_DIR,
     _inject_gherkin_tags,
     _strip_markdown_codeblock,
     decompose_specs_activity,
 )
+
+
+@pytest.fixture(autouse=True)
+def cleanup_specs_artifacts():
+    pbi_ids = ["PBI-777", "PBI-888", "PBI-999"]
+
+    def _clean():
+        for pbi in pbi_ids:
+            for comp in ("business", "app", "bff"):
+                f = BASE_DIR / "specs" / "features" / comp / f"{pbi}.feature"
+                if f.exists():
+                    f.unlink()
+
+    _clean()
+    yield
+    _clean()
 
 
 @pytest.mark.asyncio
