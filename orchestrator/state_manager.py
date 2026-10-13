@@ -130,44 +130,54 @@ class StateManager:
         reason: str = "",
         instruction: str = "",
     ) -> None:
-        """Update Current Directive in tasks/{pbi_id}/{component}/plan.md."""
+        """Update Current Directive in tasks/{pbi_id}/{component}/plan.md and state.json."""
         valid_id = validate_pbi_id(pbi_id)
         plan_file = self.get_task_dir(valid_id) / component / "plan.md"
         if not plan_file.exists():
             return
 
-        content = plan_file.read_text(encoding="utf-8")
-        lines = content.splitlines()
+        lock_file = plan_file.with_suffix(".lock")
+        with file_lock(lock_file):
+            content = plan_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
 
-        new_lines = []
-        in_directive = False
-        directive_found = False
-        for line in lines:
-            if line.strip().startswith("## Current Directive"):
-                in_directive = True
-                directive_found = True
-                new_lines.append(line)
+            new_lines = []
+            in_directive = False
+            directive_found = False
+            for line in lines:
+                if line.strip().startswith("## Current Directive"):
+                    in_directive = True
+                    directive_found = True
+                    new_lines.append(line)
+                    new_lines.append(f"- **Directive**: `{directive}`")
+                    if reason:
+                        new_lines.append(f"- **Reason**: {reason}")
+                    if instruction:
+                        new_lines.append(f"- **Instruction**: {instruction}")
+                    continue
+                if in_directive and line.startswith("## "):
+                    in_directive = False
+                if not in_directive:
+                    new_lines.append(line)
+
+            if not directive_found:
+                new_lines.append("")
+                new_lines.append("## Current Directive")
                 new_lines.append(f"- **Directive**: `{directive}`")
                 if reason:
                     new_lines.append(f"- **Reason**: {reason}")
                 if instruction:
                     new_lines.append(f"- **Instruction**: {instruction}")
-                continue
-            if in_directive and line.startswith("## "):
-                in_directive = False
-            if not in_directive:
-                new_lines.append(line)
 
-        if not directive_found:
-            new_lines.append("")
-            new_lines.append("## Current Directive")
-            new_lines.append(f"- **Directive**: `{directive}`")
-            if reason:
-                new_lines.append(f"- **Reason**: {reason}")
-            if instruction:
-                new_lines.append(f"- **Instruction**: {instruction}")
+            plan_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
-        plan_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        def _sync_state(data: Dict[str, Any]) -> None:
+            pipelines = data.setdefault("pipelines", {})
+            comp_info = pipelines.setdefault(component, {})
+            comp_info["directive"] = directive
+
+        update_task_state(valid_id, self.base_dir, _sync_state, must_exist=True)
+
         self.append_audit_log(
             valid_id,
             "DIRECTIVE_UPDATED",

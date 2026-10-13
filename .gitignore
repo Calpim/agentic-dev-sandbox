@@ -10,8 +10,7 @@ env/
 venv/
 ENV/
 
-# Temporal / Local runtime data
-temporal-data/
+# Local runtime data
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
@@ -27,3 +26,6 @@ src/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Agent hook session cache
+.agents/.agents/
