@@ -15,7 +15,6 @@ from orchestrator.guards.analyzer import (
     analyze_failure,
     classify_failure_heuristics,
 )
-from orchestrator.workflow import ComponentPipelineWorkflow
 
 
 @pytest.fixture(autouse=True)
@@ -253,76 +252,3 @@ def test_pr_body_includes_analyzer_history():
     assert "**[APP] Cycle 1 (FIX_TEST)**: 受入条件との乖離によるテストアサーション修正" in body
     assert "重点レビュー箇所" in body
     assert "Analyzer による自己修復 (FIX_TEST / RETRY_IMPL)" in body
-
-
-@pytest.mark.asyncio
-async def test_component_pipeline_workflow_autonomous_loop():
-    """ComponentPipelineWorkflow が TDD 失敗時に Analyzer を経由して自己修復できること"""
-    pbi_id = "PBI-TEST-903"
-    component = "app"
-
-    # 1 回目 TDD: 失敗 (VERIFY_FAILED)
-    # 2 回目 TDD: 成功 (ALL_GREEN)
-    tdd_call_count = 0
-
-    async def mock_execute_activity(activity_name, args, **kwargs):
-        nonlocal tdd_call_count
-        if activity_name == "run_design_activity":
-            return {"design_status": "COMPLETED"}
-        elif activity_name == "run_tdd_cycle_activity":
-            tdd_call_count += 1
-            if tdd_call_count == 1:
-                return {
-                    "tdd_status": "VERIFY_FAILED",
-                    "error": "Test defect: wrong assert",
-                }
-            else:
-                return {
-                    "tdd_status": "ALL_GREEN",
-                }
-        elif activity_name == "run_analyzer_activity":
-            return {
-                "directive": {
-                    "directive": "FIX_TEST",
-                    "reason": "テストのアサーション修正が必要",
-                    "instruction": "assert 条件を仕様に合わせてください",
-                }
-            }
-        return {}
-
-    wf = ComponentPipelineWorkflow()
-    with patch("temporalio.workflow.execute_activity", side_effect=mock_execute_activity):
-        result = await wf.run(pbi_id, component)
-
-        assert result["status"] == "SUCCESS"
-        assert tdd_call_count == 2
-        assert result["details"]["tdd_status"] == "ALL_GREEN"
-
-
-@pytest.mark.asyncio
-async def test_component_pipeline_workflow_escalates_to_human():
-    """サーキットブレーカー等で ESCALATE_HUMAN が返された場合、パイプラインが中断すること"""
-    pbi_id = "PBI-TEST-903"
-    component = "bff"
-
-    async def mock_execute_activity(activity_name, args, **kwargs):
-        if activity_name == "run_design_activity":
-            return {"design_status": "COMPLETED"}
-        elif activity_name == "run_tdd_cycle_activity":
-            return {"tdd_status": "VERIFY_FAILED", "error": "Persistent error"}
-        elif activity_name == "run_analyzer_activity":
-            return {
-                "directive": {
-                    "directive": "ESCALATE_HUMAN",
-                    "reason": "サイクル上限到達",
-                    "instruction": "人間によるレビューが必要です",
-                }
-            }
-        return {}
-
-    wf = ComponentPipelineWorkflow()
-    with patch("temporalio.workflow.execute_activity", side_effect=mock_execute_activity):
-        result = await wf.run(pbi_id, component)
-
-        assert result["status"] == "ESCALATED_HUMAN"
-        assert result["directive"]["directive"] == "ESCALATE_HUMAN"

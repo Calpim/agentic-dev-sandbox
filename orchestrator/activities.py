@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from dotenv import load_dotenv
-from temporalio import activity
 
 from orchestrator.guards.analyzer import (
     DirectiveType,
@@ -108,7 +107,6 @@ async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: 
         return None
 
 
-@activity.defn
 async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> str:
     """Phase 1-1: Example Map 生成 Activity (Gemini API 結合 & フィードバック反映)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -251,7 +249,6 @@ def _inject_gherkin_tags(gherkin_content: str, tags: List[str]) -> str:
     return result_text
 
 
-@activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
     """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -553,7 +550,6 @@ def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[st
     return yaml.safe_dump(schema_dict, allow_unicode=True, sort_keys=False)
 
 
-@activity.defn
 async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feedback: Optional[str] = None) -> str:
     """Phase 2-1: OpenAPI スキーマ ドラフト (Gemini API 結合 & 人間フィードバック反映)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -588,7 +584,6 @@ async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feed
     return str(schema_file)
 
 
-@activity.defn
 async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
     """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化 (Issue #15: アトミック排他制御)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -696,7 +691,6 @@ def _fallback_design_doc(pbi_id: str, component: str, spec_content: str, feedbac
 """
 
 
-@activity.defn
 async def run_design_activity(pbi_id: str, component: str, feedback: Optional[str] = None) -> Dict[str, Any]:
     """Phase 4-1: DDD / 設計フェーズ (Gemini API 結合)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -1043,7 +1037,6 @@ async def _run_pytest_on_target(
         return -2, "", f"SubprocessLaunchError: {str(e)}"
 
 
-@activity.defn
 async def run_tdd_cycle_activity(
     pbi_id: str,
     component: str,
@@ -1244,7 +1237,6 @@ class {_to_pascal_case(pbi_id)}Service:
         }
 
 
-@activity.defn
 async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 5-3: Analyzer 根本原因分析 & Directive 策定 (ROADMAP P1-4 & WORKFLOW 5-3)"""
     pbi_id = validate_pbi_id(pbi_id)
@@ -1690,7 +1682,6 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
         return None
 
 
-@activity.defn
 async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_res: Dict[str, Any]) -> Dict[str, Any]:
     """Phase 6: 結合検証 (Integration Gate: 契約適合 + ビジネス Gherkin BDD) & Phase 7: GitHub PR 自動作成"""
     pbi_id = validate_pbi_id(pbi_id)

@@ -292,8 +292,7 @@ orchestrator/
   state_manager.py                # ファイル駆動型状態管理（アトミック排他制御）
   guards/                         # TDD ガード・ルールガード・バリデータ
   interactive.py                  # 対話実行エンジン
-  workflow.py                     # [Deprecated] 旧 Temporal ワークフロー定義
-  run_worker.py                   # [Deprecated] 旧 Temporal ワーカー
+  cli.py                          # ターミナル対話 & 状態管理 CLI
 .agents/
   definitions/                    # 各ロール定義 (spec, design, app, bff, analyzer)
   hooks.json                      # Antigravity ライフサイクルフック
@@ -303,8 +302,8 @@ orchestrator/
 ```
 
 > [!NOTE]
-> **【Deprecated】Temporal サーバー (workflow.py / run_worker.py)**:
-> v3.0 では Temporal Server を介してワークフロー状態を管理していましたが、v4.0 では `state_manager.py` によるファイル駆動（File-Driven Protocol）へ移行しました。Temporal 関連コードは後方互換用として残されていますが、新規開発パイプラインの実行には外部サーバーは不要です。
+> **【完全削除済み】Temporal サーバー (旧 workflow.py / run_worker.py)**:
+> v4.0 では `state_manager.py` によるファイル駆動（File-Driven Protocol）へ完全一本化され、旧 Temporal 関連コードおよび依存ライブラリ（`temporalio`）はリポジトリから完全に削除されました。外部サーバーやデーモンは一切不要です。
 
 ### `state.json`（正となる状態）
 ```json

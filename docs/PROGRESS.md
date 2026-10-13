@@ -93,8 +93,7 @@ flowchart TD
    - [`orchestrator/guards/analyzer.py`](../orchestrator/guards/analyzer.py): テスト自体の誤りを是正する `FIX_TEST`、実装方針を示す `RETRY_IMPL`、再設計を促す `RETRY_DESIGN`、契約不整合を解消する `SCHEMA_CHANGE`、エスカレーション `ESCALATE_HUMAN` を判定。
 4. **対話型 Antigravity マルチ Conversation 実行環境**:
    - [`.agents/skills/workflow-runner/SKILL.md`](../.agents/skills/workflow-runner/SKILL.md): `invoke_subagent` でフェーズごとに新規 Conversation を立ち上げ、`ask_question` モーダルで Gate 1 / Gate 2 / 軽量 HIL を進行するオーケストレーター。
-   - [`orchestrator/interactive.py`](../orchestrator/interactive.py): ターミナルでも実行可能なコールバック駆動型 E2E ランナー。
-   - *（注: [`orchestrator/workflow.py`](../orchestrator/workflow.py) および `run_worker.py` は v3.0 Temporal 互換用の Deprecated 実装）*
+   - *（注: 旧 Temporal 関連コードは完全削除され、純粋な Python + StateManager による実行へ一本化されました）*
 
 ---
 
@@ -147,7 +146,7 @@ Antigravity チャットで PBI 開発を開始する手順：
 
 * **ロードマップ**: [`docs/ROADMAP.md`](ROADMAP.md)
 * **詳細仕様書**: [`docs/WORKFLOW.md`](WORKFLOW.md)
-* **オーケストレーター**: [`orchestrator/workflow.py`](../orchestrator/workflow.py)
+* **状態管理 (SSOT)**: [`orchestrator/state_manager.py`](../orchestrator/state_manager.py)
 * **対話型ランナー**: [`orchestrator/interactive.py`](../orchestrator/interactive.py)
 * **CLI インターフェース**: [`orchestrator/cli.py`](../orchestrator/cli.py)
 * **Analyzer エンジン**: [`orchestrator/guards/analyzer.py`](../orchestrator/guards/analyzer.py)

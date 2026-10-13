@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from orchestrator.guards.task_state import (
+    file_lock,
     get_task_state,
     update_pipeline_phase_atomic,
     update_task_state,
@@ -156,5 +157,7 @@ class StateManager:
             "event": event,
             "details": details,
         }
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+        lock_file = audit_file.with_suffix(".lock")
+        with file_lock(lock_file):
+            with open(audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
