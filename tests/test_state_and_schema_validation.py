@@ -36,9 +36,11 @@ def test_concurrent_state_updates(tmp_path: Path):
     update_task_state(pbi_id, tmp_path, _init)
 
     # 20個の並行ワーカーで交互に状態を更新
+    valid_phases = ["DESIGN", "RED", "GREEN", "REFACTOR", "VERIFY", "DONE"]
+
     def worker(idx: int):
         comp = "app" if idx % 2 == 0 else "bff"
-        phase = f"PHASE_{idx}"
+        phase = valid_phases[idx % len(valid_phases)]
         status = "COMPLETED" if idx % 3 == 0 else "IN_PROGRESS"
         update_pipeline_phase_atomic(pbi_id, tmp_path, comp, phase, status)
 
@@ -52,8 +54,8 @@ def test_concurrent_state_updates(tmp_path: Path):
     assert "app" in final_state["pipelines"]
     assert "bff" in final_state["pipelines"]
     # 最終更新値が正常に保持されていること
-    assert final_state["pipelines"]["app"]["phase"].startswith("PHASE_")
-    assert final_state["pipelines"]["bff"]["phase"].startswith("PHASE_")
+    assert final_state["pipelines"]["app"]["phase"] in valid_phases
+    assert final_state["pipelines"]["bff"]["phase"] in valid_phases
 
 
 def test_validate_openapi_spec_valid():

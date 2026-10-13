@@ -205,3 +205,32 @@ def test_hook_execution_from_agents_directory():
         assert proc.returncode == 0, f"Hook failed with stderr: {stderr}"
         res = json.loads(stdout.strip())
         assert res.get("decision") == "allow"
+
+
+def test_state_json_drives_tdd_isolation_for_general_paths(tmp_path: Path):
+    """環境変数なしでも tasks/*/state.json のフェーズ情報から通常ソースコードへの TDD 分離が機能すること"""
+    # 擬似リポジトリ構成を作成
+    repo = tmp_path / "repo"
+    tasks_dir = repo / "tasks" / "PBI-STATE-TEST"
+    tasks_dir.mkdir(parents=True)
+    state_file = tasks_dir / "state.json"
+
+    # 1. RED フェーズ: app プロダクションコード編集は deny、テストは allow
+    state_file.write_text(
+        json.dumps({"pipelines": {"app": {"phase": "RED", "status": "IN_PROGRESS"}}}),
+        encoding="utf-8",
+    )
+
+    # テスト対象のスクリプト実行時、repo_root を tmp_path / repo に向けるため PYTHONPATH 等を設定
+    from orchestrator.guards.tdd_isolation import get_current_phase
+    assert get_current_phase("src/app/models/user.py", repo) == "RED"
+    assert get_current_phase("src/app/tests/test_user.py", repo) == "RED"
+
+    # 2. GREEN フェーズ: app プロダクションコード編集は allow、テストは deny
+    state_file.write_text(
+        json.dumps({"pipelines": {"app": {"phase": "GREEN", "status": "IN_PROGRESS"}}}),
+        encoding="utf-8",
+    )
+    assert get_current_phase("src/app/models/user.py", repo) == "GREEN"
+    assert get_current_phase("src/app/tests/test_user.py", repo) == "GREEN"
+

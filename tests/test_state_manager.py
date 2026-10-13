@@ -81,3 +81,46 @@ def test_set_directive_fallback(tmp_path: Path):
     assert "## Current Directive" in updated_content
     assert "- **Directive**: `RETRY_IMPL`" in updated_content
     assert "- **Reason**: Syntax error" in updated_content
+
+
+def test_cli_phase_and_commands(tmp_path: Path, monkeypatch):
+    """CLI から init, phase, directive, status が正常に実行できること"""
+    from typer.testing import CliRunner
+
+    import orchestrator.cli as cli_mod
+    from orchestrator.cli import app
+
+    # StateManager の base_dir を tmp_path に向ける
+    monkeypatch.setattr(cli_mod, "state_manager", StateManager(base_dir=tmp_path))
+
+    runner = CliRunner()
+    pbi_id = "PBI-CLI-001"
+
+    # 1. init
+    res = runner.invoke(app, ["init", pbi_id])
+    assert res.exit_code == 0
+    assert "PBI タスクを初期化しました" in res.output
+
+    # 2. phase
+    res = runner.invoke(app, ["phase", pbi_id, "app", "RED"])
+    assert res.exit_code == 0
+    assert "RED" in res.output
+
+    state = cli_mod.state_manager.get_state(pbi_id)
+    assert state["pipelines"]["app"]["phase"] == "RED"
+
+    # 3. status
+    res = runner.invoke(app, ["status", pbi_id])
+    assert res.exit_code == 0
+    assert "RED" in res.output
+
+    # 4. directive
+    res = runner.invoke(app, ["directive", pbi_id, "app", "FIX_TEST", "-r", "test error", "-i", "fix assert"])
+    assert res.exit_code == 0
+    assert "Directive を更新しました" in res.output
+
+    # 5. reset
+    res = runner.invoke(app, ["reset", pbi_id])
+    assert res.exit_code == 0
+    assert "リセットしました" in res.output
+

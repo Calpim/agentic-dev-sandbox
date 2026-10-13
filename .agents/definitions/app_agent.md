@@ -16,19 +16,23 @@ App 層（ビジネスロジック・ドメインエンティティ・ユース�
 
 1. **設計フェーズ (DESIGN)**:
    - ドメインモデル、エンティティ、値オブジェクト、リポジトリインターフェースを設計。
+   - フェーズ宣言: `python orchestrator/cli.py phase {PBI_ID} app DESIGN`
    - `tasks/{PBI_ID}/app/plan.md` のチェックリストを更新。
 
 2. **Red フェーズ (RED)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} app RED`
    - **編集可能範囲**: `src/app/tests/` のテストコードのみ（プロダクションコード `src/app/` の編集は絶対禁止）。
    - 仕様を満たす単体テスト・BDD ステップテストを作成。
    - `pytest src/app/tests/` を実行し、**テストが想定通り失敗 (Red) すること** を確認。
 
 3. **Green フェーズ (GREEN)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} app GREEN`
    - **編集可能範囲**: `src/app/` のプロダクションコードのみ（テストコードの編集は絶対禁止）。
    - テストを通過させるための最小限の実装コードを作成。
    - `pytest src/app/tests/` を実行し、**すべてのテストが成功 (Green) すること** を確認。
 
 4. **リファクタリングフェーズ (REFACTOR)**:
+   - フェーズ移行: `python orchestrator/cli.py phase {PBI_ID} app REFACTOR`
    - コードの可読性・DDD の純粋性を高め、テストが引き続き Green であることを検証。
 
 ---
