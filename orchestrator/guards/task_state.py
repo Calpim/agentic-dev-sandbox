@@ -12,6 +12,24 @@ from orchestrator.guards.validators import validate_pbi_id, validate_safe_path
 logger = logging.getLogger("orchestrator.task_state")
 
 _in_process_lock = Lock()
+VALID_PIPELINE_COMPONENTS = {"app", "bff"}
+VALID_PIPELINE_PHASES = {
+    "INIT",
+    "DESIGN",
+    "RED",
+    "GREEN",
+    "REFACTOR",
+    "VERIFY",
+    "ANALYZER",
+    "DONE",
+}
+VALID_PIPELINE_STATUSES = {
+    "PLANNED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "FAILED",
+    "BLOCKED",
+}
 
 
 def _acquire_os_lock(fd: int) -> bool:
@@ -182,6 +200,15 @@ def update_pipeline_phase_atomic(
     status: str = "IN_PROGRESS",
 ) -> Dict[str, Any]:
     """コンポーネントごとのパイプラインフェーズをアトミックに更新する (ファイルが存在する場合のみ更新)"""
+    component = component.strip().lower()
+    phase = phase.strip().upper()
+    status = status.strip().upper()
+    if component not in VALID_PIPELINE_COMPONENTS:
+        raise ValueError(f"Invalid component '{component}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_COMPONENTS))}.")
+    if phase not in VALID_PIPELINE_PHASES:
+        raise ValueError(f"Invalid phase '{phase}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_PHASES))}.")
+    if status not in VALID_PIPELINE_STATUSES:
+        raise ValueError(f"Invalid status '{status}'. Expected one of: {', '.join(sorted(VALID_PIPELINE_STATUSES))}.")
 
     def _mutate(data: Dict[str, Any]) -> None:
         if "pipelines" not in data or not isinstance(data["pipelines"], dict):

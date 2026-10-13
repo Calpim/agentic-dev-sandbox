@@ -131,12 +131,16 @@ def phase(
         console.print(f"[bold red]無効なコンポーネントです: {component} (app または bff を指定してください)[/bold red]")
         sys.exit(1)
 
-    state_manager.set_component_phase(
-        pbi_id=pbi_id,
-        component=comp_norm,
-        phase=phase_name.upper(),
-        status=status,
-    )
+    try:
+        state_manager.set_component_phase(
+            pbi_id=pbi_id,
+            component=comp_norm,
+            phase=phase_name,
+            status=status,
+        )
+    except ValueError as e:
+        console.print(f"[bold red]入力エラー: {e}[/bold red]")
+        raise typer.BadParameter(str(e))
     console.print(f"[bold green]フェーズを更新しました: {pbi_id} ({comp_norm}) -> {phase_name.upper()} ({status})[/bold green]")
 
 

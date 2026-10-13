@@ -108,12 +108,15 @@ def get_current_phase(rel_path: str, repo_root: Path) -> str:
                         p_phase = pipelines[comp].get("phase", "").upper()
                         if p_phase in ("RED", "GREEN", "REFACTOR"):
                             return p_phase
-                    # コンポーネント特定できない場合はアクティブなフェーズを探索
-                    for c in ("app", "bff"):
-                        if c in pipelines and isinstance(pipelines[c], dict):
-                            c_phase = pipelines[c].get("phase", "").upper()
-                            if c_phase in ("RED", "GREEN", "REFACTOR"):
-                                return c_phase
+                        # 対象コンポーネントが完了/未開始なら、他コンポーネントや古いPBIへフォールバックしない
+                        return ""
+                    # パスからコンポーネントを特定できない場合のみ、アクティブなフェーズを探索
+                    if comp is None:
+                        for c in ("app", "bff"):
+                            if c in pipelines and isinstance(pipelines[c], dict):
+                                c_phase = pipelines[c].get("phase", "").upper()
+                                if c_phase in ("RED", "GREEN", "REFACTOR"):
+                                    return c_phase
                 except Exception:
                     pass
 
