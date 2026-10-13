@@ -116,11 +116,13 @@ def update_task_state(
     base_dir: Path,
     mutator: Callable[[Dict[str, Any]], None],
     must_exist: bool = False,
+    create_only: bool = False,
 ) -> Dict[str, Any]:
     """
     tasks/{pbi_id}/state.json を排他ロック下でアトミックに読み取り・変更・書き込みする (Issue #15).
     state.json が壊れている場合は空で上書きせず ValueError を送出して元データを保全。
     must_exist=True の場合、ファイルが存在しなければ何もせず空辞書を返す。
+    create_only=True の場合、既存 state を変更せず FileExistsError を送出する。
     """
     pbi_id = validate_pbi_id(pbi_id)
     task_dir = validate_safe_path(base_dir / "tasks", base_dir / "tasks" / pbi_id)
@@ -136,6 +138,8 @@ def update_task_state(
         with file_lock(lock_file):
             if must_exist and not state_file.exists():
                 return {}
+            if create_only and state_file.exists():
+                raise FileExistsError(f"Task state already exists for {pbi_id}.")
 
             data: Dict[str, Any] = {}
             if state_file.exists():

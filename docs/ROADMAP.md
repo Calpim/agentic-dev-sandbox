@@ -1,6 +1,6 @@
 # 導入ロードマップ
 
-[WORKFLOW.md](./WORKFLOW.md)（v3.0）を段階的に導入するための手順書です。
+[WORKFLOW.md](./WORKFLOW.md)（v4.0 Agent-Native）を段階的に導入・発展させるための手順書です。
 
 > [!IMPORTANT]
 > **基本方針**: 一度に全部を入れない。各ステージの **完了条件** を満たしてから次へ進む。
@@ -15,14 +15,18 @@ flowchart LR
     P0["P0 基盤<br>手動運用で型を作る"] --> P1["P1 MVP<br>単一パイプラインの自律ループ"]
     P1 --> P2["P2 並行化<br>App / BFF 分離と契約"]
     P2 --> P3["P3 最適化<br>KPI に応じて条件付きで追加"]
+    P3 --> P4["P4 Agent-Native (現在地)<br>マルチConversation / StateManager"]
+    P4 --> P5["P5 ポータビリティ<br>Claude Code / Codex 連携"]
 ```
 
-| 優先度 | ステージ | 目的 | 目安期間 |
+| 優先度 | ステージ | 目的 | 状態 |
 | :--- | :--- | :--- | :--- |
-| **P0** | 基盤 | 人間ゲートと品質の土台を作る。自律化はまだしない | 1〜2週 |
-| **P1** | MVP | 1つの層・1つのエージェントで、PBI → PR の自律ループを成立させる | 2〜4週 |
-| **P2** | 並行化 | App / BFF を契約で分離し、並行して開発する | 3〜4週 |
-| **P3** | 最適化 | KPI を見て、必要な層だけを追加する | 継続 |
+| **P0** | 基盤 | 人間ゲートと品質の土台を作る。自律化はまだしない | ✅ 完了 |
+| **P1** | MVP | 1つの層・1つのエージェントで、PBI → PR の自律ループを成立させる | ✅ 完了 |
+| **P2** | 並行化 | App / BFF を契約で分離し、並行して開発する（RESYNC 同期対応） | ✅ 完了 |
+| **P3** | 最適化 | KPI を見て、必要な層だけを追加する | 継続的 |
+| **P4** | **エージェントネイティブ** | **【v4.0 現在地】Temporal / API 直接呼出を撤廃し、Subagent（新規 Conversation）協調へ** | ✅ 完了 |
+| **P5** | **エージェントポータビリティ** | **Claude Code CLI や Codex から同一プロトコルで駆動** | 準備完了 |
 
 ---
 
@@ -70,11 +74,14 @@ flowchart LR
 > 小さめの PBI を選ぶ。
 
 ### P1-1. オーケストレーター最小版
+> [!NOTE]
+> **【Deprecated in v4.0】Temporal から軽量 StateManager への移行**:
+> 当初は Temporal Server による耐久ワークフロー（`workflow.py`）として構築されましたが、Temporal デーモン・Worker の常駐や管理コストが重かったため、v4.0 では `orchestrator/state_manager.py` による軽量なファイル駆動型（OS 排他ロック付き `state.json`）へ移行しました。
 * **手順**
   1. `state.json` によるフェーズ遷移（DESIGN → RED → GREEN → REFACTOR → VERIFY → DONE）を実装する
   2. カウンタ（`rule_guard` / `self_retry` / `analyzer_cycles`）とトークン予算を実装し、上限を超えたら停止して通知する
   3. `plan.md` のフロントマターと進捗欄を `state.json` から生成する
-  4. エージェントは headless モードで呼び出す（Claude Code なら `claude -p`、Antigravity なら CLI）
+  4. エージェントは headless モードで呼び出す（Claude Code なら `claude -p`、Antigravity なら CLI / Subagents）
 * **なぜ必要か**: リトライ回数やフェーズを LLM に管理させると、書き忘れ・書き間違い・リセットが起きます。サーキットブレーカーはそれ自体が壊れない場所に置く必要があります。後続の Guard もすべて `state.json` のフェーズを参照します。
 * **完了条件**: 意図的に失敗するタスクを入れたとき、上限で確実に止まり通知が届く
 
@@ -174,12 +181,14 @@ flowchart LR
 
 ---
 
-## 意図的に導入しないもの（v2.0 からの削除・保留）
+## 意図的に導入しないもの・廃止されたもの（v4.0 での変更点）
 
 | 項目 | 判断 | 理由 |
 | :--- | :--- | :--- |
+| **Temporal サーバー** | **【Deprecated】廃止** | Docker / DB / Worker の管理コストが重く、自律開発の軽量な運用を阻害するため。pure Python + OS 排他ロックの `state_manager.py` へ移行。 |
+| **Gemini API 直接呼出** | **【Deprecated】撤廃** | API キー管理が必要かつ単なるテキスト補完に留まっていたため。Antigravity の `invoke_subagent` による独立 Conversation 協調へ昇格。 |
 | Jev（軽量トリアージ） | **保留**（P3 で条件付き） | 自己リトライで代替できる。層を減らしてエスカレーション経路を単純にする |
-| Fable 専用ロール | **Analyzer に統合** | Opus 5.5 High が担当する読み取り専用ロールに一本化 |
+| Fable 専用ロール | **Analyzer に統合** | 読み取り専用の Analyzer ロールに一本化（`.agents/definitions/analyzer_agent.md`） |
 | BFF のフル DDD | **軽量設計に変更** | BFF はマッピングと集約が中心。ドメインロジックが BFF に漏れてきたら設計見直しのサイン |
 | Pact | **保留**（P3 で条件付き） | スキーマファーストの検証と重なる部分が大きい |
 | モックの手書き全面禁止 | **生成元の一元化に変更** | OpenAPI だけでは状態遷移を表現できないため、fixture は許可する |
@@ -188,17 +197,21 @@ flowchart LR
 
 ## 推奨の着手順（チェックリスト）
 
-- [ ] P0-1 CI ベースライン & ブランチ保護
-- [ ] P0-2 Rules の整備
-- [ ] P0-3 Example Mapping → Gherkin（PO と試す）
-- [ ] P0-4 手動ドライラン（1 PBI）
-- [ ] P1-1 オーケストレーター最小版
-- [ ] P1-2 TDD 権限分離 Guard
-- [ ] P1-3 Rule Guard スクリプト
-- [ ] P1-4 Analyzer（`FIX_TEST` ルートを含む）
-- [ ] P1-5 受け入れテストの実行
-- [ ] P1-6 PR 生成
-- [ ] **P1 の完了判定**
-- [ ] P2-1 〜 P2-6
-- [ ] **P2 の完了判定**
-- [ ] P3（KPI を見て選ぶ）
+- [x] P0-1 CI ベースライン & ブランチ保護
+- [x] P0-2 Rules の整備
+- [x] P0-3 Example Mapping → Gherkin（PO と試す）
+- [x] P0-4 手動ドライラン（1 PBI）
+- [x] P1-1 オーケストレーター最小版 (旧 Temporal 実装)
+- [x] P1-2 TDD 権限分離 Guard
+- [x] P1-3 Rule Guard スクリプト
+- [x] P1-4 Analyzer（`FIX_TEST` ルートを含む）
+- [x] P1-5 受け入れテストの実行
+- [x] P1-6 PR 生成
+- [x] **P1 の完了判定**
+- [x] P2-1 〜 P2-6（並行開発 & スキーマ変更 RESYNC 同期）
+- [x] **P2 の完了判定**
+- [x] **P4-1 エージェント定義の独立化（`.agents/definitions/`）**
+- [x] **P4-2 StateManager によるファイル駆動型プロトコルへの移行（Temporal 依存撤廃）**
+- [x] **P4-3 Antigravity Subagent（新規 Conversation 並行起動）パイプラインの確立**
+- [ ] P5 Claude Code CLI / Codex 連携ドライラン
+- [ ] P3 最適化（KPI を見て選ぶ）

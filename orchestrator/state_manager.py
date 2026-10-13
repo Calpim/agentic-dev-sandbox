@@ -1,0 +1,200 @@
+"""PBI State and Directive Manager for File-Driven Agent Pipeline.
+
+Provides clean, safe, and thread-safe APIs to manage task states, plans,
+and directives without requiring Temporal or an external database.
+"""
+
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from orchestrator.guards.task_state import (
+    file_lock,
+    get_task_state,
+    update_pipeline_phase_atomic,
+    update_task_state,
+)
+from orchestrator.guards.validators import validate_pbi_id, validate_safe_path
+
+logger = logging.getLogger("orchestrator.state_manager")
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+class StateManager:
+    """Manages file-driven task state under tasks/{pbi_id}/."""
+
+    def __init__(self, base_dir: Optional[Path] = None):
+        self.base_dir = base_dir or BASE_DIR
+
+    def get_task_dir(self, pbi_id: str) -> Path:
+        valid_id = validate_pbi_id(pbi_id)
+        task_root = self.base_dir / "tasks"
+        task_dir = validate_safe_path(task_root, task_root / valid_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        return task_dir
+
+    def init_pbi(self, pbi_id: str, schema_path: Optional[str] = None) -> Path:
+        """Create a task only when it has not already been initialized."""
+        valid_id = validate_pbi_id(pbi_id)
+        task_dir = self.get_task_dir(valid_id)
+        resolved_schema = schema_path or str(self.base_dir / "specs" / "api" / "v1" / f"{valid_id}.yaml")
+
+        update_task_state(
+            valid_id,
+            self.base_dir,
+            lambda data: self._initialize_state(data, valid_id, resolved_schema),
+            create_only=True,
+        )
+        self._write_initial_plans(task_dir, valid_id, resolved_schema)
+        self.append_audit_log(valid_id, "PBI_INITIALIZED", {"schema_path": resolved_schema})
+        return task_dir
+
+    @staticmethod
+    def _initialize_state(data: Dict[str, Any], pbi_id: str, schema_path: str) -> None:
+        data.update(
+            {
+                "pbi": pbi_id,
+                "schema_path": schema_path,
+                "stage": "INITIALIZED",
+                "pipelines": {
+                    "app": {"phase": "INIT", "status": "PLANNED"},
+                    "bff": {"phase": "INIT", "status": "PLANNED"},
+                },
+            }
+        )
+
+    def _write_initial_plans(self, task_dir: Path, pbi_id: str, schema_path: str) -> None:
+        for component in ("app", "bff"):
+            component_dir = task_dir / component
+            component_dir.mkdir(parents=True, exist_ok=True)
+            (component_dir / "plan.md").write_text(
+                self._plan_content(pbi_id, component, schema_path), encoding="utf-8"
+            )
+
+    @staticmethod
+    def _plan_content(pbi_id: str, component: str, schema_path: str) -> str:
+        return f"""# Execution Plan: {pbi_id} ({component.upper()})
+
+## 前提リソース
+- Schema: `{schema_path}`
+- Spec: `specs/features/{component}/{pbi_id}.feature`
+
+## 進捗
+- [x] Phase 1 & 2: 仕様・設計承認
+- [ ] Phase 4-1: 設計 (DESIGN)
+- [ ] Phase 4-2: TDD Red (テスト作成 & 失敗確認)
+- [ ] Phase 4-3: TDD Green (実装 & テスト成功)
+- [ ] Phase 4-4: Refactor (整理)
+
+## Current Directive
+- 初期化完了。設計フェーズに着手してください。
+"""
+
+    def reset_pbi(self, pbi_id: str, schema_path: Optional[str] = None) -> Path:
+        """Reset task state and plans while preserving audit, specs, and implementation files."""
+        valid_id = validate_pbi_id(pbi_id)
+        task_dir = self.get_task_dir(valid_id)
+        resolved_schema = schema_path or str(self.base_dir / "specs" / "api" / "v1" / f"{valid_id}.yaml")
+
+        def _reset_data(data: Dict[str, Any]) -> None:
+            data.clear()
+            self._initialize_state(data, valid_id, resolved_schema)
+
+        update_task_state(valid_id, self.base_dir, _reset_data)
+        self._write_initial_plans(task_dir, valid_id, resolved_schema)
+        self.append_audit_log(valid_id, "PBI_RESET", {"schema_path": resolved_schema})
+        return task_dir
+
+    def get_state(self, pbi_id: str) -> Dict[str, Any]:
+        """Read state.json safely."""
+        valid_id = validate_pbi_id(pbi_id)
+        return get_task_state(valid_id, self.base_dir)
+
+    def set_component_phase(self, pbi_id: str, component: str, phase: str, status: str = "IN_PROGRESS") -> None:
+        """Update phase of a component (app / bff) atomically."""
+        valid_id = validate_pbi_id(pbi_id)
+        update_pipeline_phase_atomic(valid_id, self.base_dir, component, phase, status)
+        self.append_audit_log(
+            valid_id,
+            "PHASE_CHANGED",
+            {"component": component, "phase": phase, "status": status},
+        )
+
+    def set_directive(
+        self,
+        pbi_id: str,
+        component: str,
+        directive: str,
+        reason: str = "",
+        instruction: str = "",
+    ) -> None:
+        """Update Current Directive in tasks/{pbi_id}/{component}/plan.md and state.json."""
+        valid_id = validate_pbi_id(pbi_id)
+        plan_file = self.get_task_dir(valid_id) / component / "plan.md"
+        if not plan_file.exists():
+            return
+
+        lock_file = plan_file.with_suffix(".lock")
+        with file_lock(lock_file):
+            content = plan_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
+
+            new_lines = []
+            in_directive = False
+            directive_found = False
+            for line in lines:
+                if line.strip().startswith("## Current Directive"):
+                    in_directive = True
+                    directive_found = True
+                    new_lines.append(line)
+                    new_lines.append(f"- **Directive**: `{directive}`")
+                    if reason:
+                        new_lines.append(f"- **Reason**: {reason}")
+                    if instruction:
+                        new_lines.append(f"- **Instruction**: {instruction}")
+                    continue
+                if in_directive and line.startswith("## "):
+                    in_directive = False
+                if not in_directive:
+                    new_lines.append(line)
+
+            if not directive_found:
+                new_lines.append("")
+                new_lines.append("## Current Directive")
+                new_lines.append(f"- **Directive**: `{directive}`")
+                if reason:
+                    new_lines.append(f"- **Reason**: {reason}")
+                if instruction:
+                    new_lines.append(f"- **Instruction**: {instruction}")
+
+            plan_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+        def _sync_state(data: Dict[str, Any]) -> None:
+            pipelines = data.setdefault("pipelines", {})
+            comp_info = pipelines.setdefault(component, {})
+            comp_info["directive"] = directive
+
+        update_task_state(valid_id, self.base_dir, _sync_state, must_exist=True)
+
+        self.append_audit_log(
+            valid_id,
+            "DIRECTIVE_UPDATED",
+            {"component": component, "directive": directive, "reason": reason, "instruction": instruction},
+        )
+
+    def append_audit_log(self, pbi_id: str, event: str, details: Dict[str, Any]) -> None:
+        """Append audit event to tasks/{pbi_id}/audit.jsonl."""
+        valid_id = validate_pbi_id(pbi_id)
+        audit_file = self.get_task_dir(valid_id) / "audit.jsonl"
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "pbi": valid_id,
+            "event": event,
+            "details": details,
+        }
+        lock_file = audit_file.with_suffix(".lock")
+        with file_lock(lock_file):
+            with open(audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")

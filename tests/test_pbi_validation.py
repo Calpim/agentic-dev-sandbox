@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from orchestrator.guards.validators import validate_pbi_id, validate_safe_path
-from orchestrator.workflow import PBIDevelopmentWorkflow
 
 
 def test_validate_pbi_id_valid():
@@ -47,78 +46,3 @@ def test_validate_safe_path(tmp_path: Path):
     traversal_path = base_dir / ".." / "outside.txt"
     with pytest.raises(ValueError, match="Path traversal detected"):
         validate_safe_path(base_dir, traversal_path)
-
-
-def test_workflow_signal_stage_guard():
-    wf = PBIDevelopmentWorkflow()
-
-    # 1. INIT stage: all signals should be ignored
-    wf.state.stage = "INIT"
-    wf.approve_example_map()
-    assert wf.state.example_map_approved is False
-    assert len(wf.state.ignored_signals) == 1
-    assert "approve_example_map" in wf.state.ignored_signals[0]
-
-    wf.approve_schema()
-    assert wf.state.schema_approved is False
-    assert len(wf.state.ignored_signals) == 2
-    assert "approve_schema" in wf.state.ignored_signals[1]
-
-    wf.approve_schema_change("approved diff")
-    assert wf.state.schema_change_approved is False
-    assert len(wf.state.ignored_signals) == 3
-    assert "approve_schema_change" in wf.state.ignored_signals[2]
-
-    # 2. Gate 1 stage: approve_example_map / reject_example_map accepted, others ignored
-    wf.state.stage = "WAITING_HUMAN_GATE_1_EXAMPLE_MAP"
-    wf.approve_example_map()
-    assert wf.state.example_map_approved is True
-    assert len(wf.state.ignored_signals) == 3  # unchanged
-
-    wf.approve_schema()
-    assert wf.state.schema_approved is False
-    assert len(wf.state.ignored_signals) == 4
-
-    # 3. Gate 2 stage: approve_schema accepted, Gate 1 ignored
-    wf.state.stage = "WAITING_HUMAN_GATE_2_SCHEMA"
-    wf.approve_schema()
-    assert wf.state.schema_approved is True
-    assert len(wf.state.ignored_signals) == 4  # unchanged
-
-    wf.reject_example_map("try again")
-    assert wf.state.example_map_feedback is None
-    assert len(wf.state.ignored_signals) == 5
-
-    # 4. Lightweight HIL stage: approve_schema_change accepted
-    wf.state.stage = "WAITING_LIGHTWEIGHT_HIL_SCHEMA_CHANGE"
-    wf.approve_schema_change("looks good")
-    assert wf.state.schema_change_approved is True
-    assert wf.state.schema_change_feedback == "looks good"
-    assert len(wf.state.ignored_signals) == 5  # unchanged
-
-
-def test_workflow_signals_rejected_during_retrying_stage():
-    """RETRYING_* ステージ中はいかなる承認シグナルも受領せず無視されること (Issue #18)"""
-    wf = PBIDevelopmentWorkflow()
-
-    wf.state.stage = "RETRYING_EXAMPLE_MAP"
-    wf.approve_example_map()
-    assert wf.state.example_map_approved is False
-    assert len(wf.state.ignored_signals) == 1
-    assert "RETRYING_EXAMPLE_MAP" in wf.state.ignored_signals[0]
-
-    wf.state.stage = "RETRYING_SCHEMA"
-    wf.approve_schema()
-    assert wf.state.schema_approved is False
-    assert len(wf.state.ignored_signals) == 2
-    assert "RETRYING_SCHEMA" in wf.state.ignored_signals[1]
-
-
-@pytest.mark.asyncio
-async def test_workflow_run_invalid_pbi_id():
-    """無効な PBI ID が渡された場合、ApplicationError (non-retryable) が送出されること"""
-    from temporalio.exceptions import ApplicationError
-
-    wf = PBIDevelopmentWorkflow()
-    with pytest.raises(ApplicationError, match="Invalid PBI ID"):
-        await wf.run("invalid-id", "content")

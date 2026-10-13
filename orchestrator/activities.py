@@ -1,3 +1,11 @@
+"""Legacy activity pipeline retained for compatibility and existing tests.
+
+Deprecated since v4.0: this Temporal-era, Gemini-backed orchestration path is
+not used by the supported workflow. Start autonomous work with the
+``workflow-runner`` skill and native subagents instead. The activity functions
+below remain only for legacy callers and are not the agent-native entry point.
+"""
+
 import asyncio
 import json
 import logging
@@ -13,7 +21,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from dotenv import load_dotenv
-from temporalio import activity
 
 from orchestrator.guards.analyzer import (
     DirectiveType,
@@ -66,6 +73,7 @@ def _strip_markdown_codeblock(text: Optional[str]) -> str:
 
 
 async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> Optional[str]:
+    """Deprecated Gemini-backed generator; use the Spec subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -108,9 +116,8 @@ async def _call_gemini_for_example_map(pbi_id: str, pbi_content: str, feedback: 
         return None
 
 
-@activity.defn
 async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback: Optional[str] = None) -> str:
-    """Phase 1-1: Example Map 生成 Activity (Gemini API 結合 & フィードバック反映)"""
+    """Deprecated legacy pipeline activity; use the Spec subagent."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Generating Example Map for {pbi_id} (feedback: {feedback})")
 
@@ -164,6 +171,7 @@ async def generate_example_map_activity(pbi_id: str, pbi_content: str, feedback:
 
 
 async def _call_gemini_for_decomposition(pbi_id: str, example_map_content: str) -> Optional[Dict[str, str]]:
+    """Deprecated Gemini-backed generator; use the Spec subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -251,9 +259,8 @@ def _inject_gherkin_tags(gherkin_content: str, tags: List[str]) -> str:
     return result_text
 
 
-@activity.defn
 async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[str, str]:
-    """Phase 1-2 & 1-3: ビジネス Gherkin 生成 & App/BFF 分解 (Gemini API 結合)"""
+    """Deprecated legacy pipeline activity; use the Spec subagent."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Decomposing specs for {pbi_id} from {example_map_path}")
 
@@ -409,6 +416,7 @@ async def decompose_specs_activity(pbi_id: str, example_map_path: str) -> Dict[s
 async def _call_gemini_for_openapi(
     pbi_id: str, bff_gherkin: str, biz_gherkin: str, feedback: Optional[str] = None
 ) -> Optional[str]:
+    """Deprecated Gemini-backed schema generator; use the Design subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -553,9 +561,8 @@ def _fallback_draft_openapi(pbi_id: str, bff_gherkin: str, feedback: Optional[st
     return yaml.safe_dump(schema_dict, allow_unicode=True, sort_keys=False)
 
 
-@activity.defn
 async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feedback: Optional[str] = None) -> str:
-    """Phase 2-1: OpenAPI スキーマ ドラフト (Gemini API 結合 & 人間フィードバック反映)"""
+    """Deprecated legacy pipeline activity; use the Design subagent."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Drafting OpenAPI schema for {pbi_id} (feedback: {feedback})")
     schema_dir = BASE_DIR / "specs" / "api" / "v1"
@@ -588,9 +595,8 @@ async def draft_schema_activity(pbi_id: str, decomp_result: Dict[str, str], feed
     return str(schema_file)
 
 
-@activity.defn
 async def initialize_tasks_activity(pbi_id: str, schema_path: str) -> None:
-    """Phase 2-2: tasks/ 以下の state.json と plan.md の初期化 (Issue #15: アトミック排他制御)"""
+    """Deprecated legacy initializer; use StateManager.init_pbi instead."""
     pbi_id = validate_pbi_id(pbi_id)
     task_dir = validate_safe_path(BASE_DIR / "tasks", BASE_DIR / "tasks" / pbi_id)
     _ensure_dir(task_dir / "app")
@@ -636,6 +642,7 @@ def _update_pipeline_phase(pbi_id: str, component: str, phase: str, status: str 
 async def _call_gemini_for_design(
     pbi_id: str, component: str, spec_content: str, schema_content: str, feedback: Optional[str] = None
 ) -> Optional[str]:
+    """Deprecated Gemini-backed designer; use the Design or component subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -696,9 +703,8 @@ def _fallback_design_doc(pbi_id: str, component: str, spec_content: str, feedbac
 """
 
 
-@activity.defn
 async def run_design_activity(pbi_id: str, component: str, feedback: Optional[str] = None) -> Dict[str, Any]:
-    """Phase 4-1: DDD / 設計フェーズ (Gemini API 結合)"""
+    """Deprecated legacy pipeline activity; use the App or BFF subagent."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Running Design activity for {pbi_id} / {component} (feedback={feedback})")
     _update_pipeline_phase(pbi_id, component, "DESIGN", "IN_PROGRESS")
@@ -834,7 +840,7 @@ async def _call_gemini_for_impl(
     design_content: Optional[str] = None,
     directive_instruction: Optional[str] = None,
 ) -> Optional[str]:
-    """Gemini API を利用して DDD 実装コードを非同期に生成する (asyncio.to_thread 委任)"""
+    """Deprecated Gemini-backed implementation generator; use the component subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key or not design_content:
         return None
@@ -892,7 +898,7 @@ async def _call_gemini_for_bdd_steps(
     feature_content: str,
     directive_instruction: Optional[str] = None,
 ) -> Optional[str]:
-    """Gemini API を利用して Gherkin フィーチャーに対応する pytest-bdd Step Definitions を生成する"""
+    """Deprecated Gemini-backed BDD generator; use the component subagent."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         return None
@@ -1043,14 +1049,13 @@ async def _run_pytest_on_target(
         return -2, "", f"SubprocessLaunchError: {str(e)}"
 
 
-@activity.defn
 async def run_tdd_cycle_activity(
     pbi_id: str,
     component: str,
     design_output: Dict[str, Any],
     directive: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Phase 4-2 & 5: TDD サイクル (Red -> Green -> Refactor -> Verify with Rule Guard & Analyzer)"""
+    """Deprecated legacy TDD pipeline; use the App and BFF subagents."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(
         f"Running TDD cycle for {pbi_id} / {component} (directive={directive.get('directive') if directive else None})"
@@ -1244,9 +1249,8 @@ class {_to_pascal_case(pbi_id)}Service:
         }
 
 
-@activity.defn
 async def run_analyzer_activity(pbi_id: str, component: str, failure_context: Dict[str, Any]) -> Dict[str, Any]:
-    """Phase 5-3: Analyzer 根本原因分析 & Directive 策定 (ROADMAP P1-4 & WORKFLOW 5-3)"""
+    """Deprecated legacy analyzer activity; use the Analyzer subagent."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Running Analyzer activity for {pbi_id} / {component}")
     _update_pipeline_phase(pbi_id, component, "ANALYZER", "IN_PROGRESS")
@@ -1690,9 +1694,8 @@ def _create_github_pr(pbi_id: str, title: str, body: str) -> Optional[str]:
         return None
 
 
-@activity.defn
 async def integration_and_pr_activity(pbi_id: str, app_res: Dict[str, Any], bff_res: Dict[str, Any]) -> Dict[str, Any]:
-    """Phase 6: 結合検証 (Integration Gate: 契約適合 + ビジネス Gherkin BDD) & Phase 7: GitHub PR 自動作成"""
+    """Deprecated legacy integration/PR activity; use the workflow-runner finalization steps."""
     pbi_id = validate_pbi_id(pbi_id)
     logger.info(f"Phase 6: Starting Integration Verification and PR creation for {pbi_id}")
     clean_id = _clean_id(pbi_id)

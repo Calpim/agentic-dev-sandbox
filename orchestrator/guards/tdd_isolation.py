@@ -10,6 +10,17 @@ import json
 import os
 import re
 import sys
+
+if hasattr(sys.stdin, "reconfigure"):
+    try:
+        getattr(sys.stdin, "reconfigure")(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8")
+    except Exception:
+        pass
 from pathlib import Path
 
 TEST_PATTERN = re.compile(
